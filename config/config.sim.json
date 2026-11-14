@@ -1,0 +1,66 @@
+{
+  "node_id": "A",
+  "transport": "sim",
+  "phy": {
+    "data_lanes": 3,
+    "clock_hz": 100,
+    "sample_edge": "rising",
+    "idle_gap_cycles": 2
+  },
+  "protocol": {
+    "encoding": "utf-8",
+    "crc": "smbus",
+    "timeout_ms": 1000,
+    "max_retries": 3
+  },
+  "tx": {
+    "clock": {
+      "pin": "SIM_CLK",
+      "medium": "gpio-directo"
+    },
+    "lanes": [
+      {
+        "lane": 0,
+        "medium": "luz",
+        "pin": "SIM_TX0"
+      },
+      {
+        "lane": 1,
+        "medium": "sonido",
+        "pin": "SIM_TX1"
+      },
+      {
+        "lane": 2,
+        "medium": "vibracion",
+        "pin": "SIM_TX2"
+      }
+    ]
+  },
+  "rx": {
+    "clock": {
+      "pin": "SIM_CLK",
+      "medium": "gpio-directo"
+    },
+    "lanes": [
+      {
+        "lane": 0,
+        "medium": "luz",
+        "pin": "SIM_RX0"
+      },
+      {
+        "lane": 1,
+        "medium": "sonido",
+        "pin": "SIM_RX1"
+      },
+      {
+        "lane": 2,
+        "medium": "vibracion",
+        "pin": "SIM_RX2"
+      }
+    ]
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "port": 8080
+  }
+}
