@@ -1,0 +1,19 @@
+CC ?= gcc
+CFLAGS ?= -std=c99 -Wall -Wextra -O2 -Iinclude
+BIN = light_rx_test
+SOURCES = tools/light_rx_test.c src/phy_gpio.c src/phy_analog.c src/phy_sample.c
+HEADERS = include/phy_gpio.h include/phy_analog.h include/phy_sample.h
+PROBE_ARGS ?= --pattern 1110 --clock-hz 2
+
+.PHONY: all run clean
+
+all: $(BIN)
+
+$(BIN): $(SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) -o $@ $(SOURCES)
+
+run: $(BIN)
+	@sudo ./$(BIN) $(PROBE_ARGS)
+
+clean:
+	rm -f $(BIN)

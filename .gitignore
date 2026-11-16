@@ -1,8 +1,10 @@
+c/phy_chat
+c/test_protocol
+c/light_probe
+c/flipflopT
+c/light_rx_test
+*.o
 __pycache__/
 *.py[cod]
-.venv/
-venv/
-env/
-*.egg-info/
-*.zip
-.pytest_cache/
+c/phy_light_tx
+c/test_rx

@@ -6,8 +6,106 @@ en otro equipo sin perder las decisiones tomadas.
 
 - **Proyecto:** protocolo de comunicación de Capa Física no convencional.
 - **Plataforma objetivo:** BeagleBone Black Rev C.
-- **Desarrollo inicial:** equipo de escritorio, pruebas de terminal a terminal.
-- **Última actualización:** 2026-11-13.
+- **Desarrollo actual:** PC para gateway y pruebas; BeagleBone para el nodo físico.
+- **Última actualización:** 2026-11-16.
+
+---
+
+## Índice
+
+- [Estado actual](#estado-actual)
+- [1. Cómo usar este documento](#1-cómo-usar-este-documento)
+- [2. Contexto del proyecto](#2-contexto-del-proyecto)
+- [3. Restricciones reales del hardware](#3-restricciones-reales-del-hardware)
+- [4. Decisiones cerradas](#4-decisiones-cerradas)
+- [5. Arquitectura de software](#5-arquitectura-de-software)
+- [6. Especificación de la trama PHY](#6-especificación-de-la-trama-phy)
+- [7. Capa física y canales](#7-capa-física-y-canales)
+- [8. CRC-8](#8-crc-8)
+- [9. Capa de presentación](#9-capa-de-presentación)
+- [10. Capa de enlace de datos](#10-capa-de-enlace-de-datos)
+- [11. Capa de aplicación: sala de chat web](#11-capa-de-aplicación-sala-de-chat-web)
+- [12. Configuración](#12-configuración)
+- [13. Plan por fases](#13-plan-por-fases)
+- [14. Estrategia de pruebas](#14-estrategia-de-pruebas)
+- [15. Implementación en C](#15-implementación-en-c)
+- [16. Migración a BeagleBone](#16-migración-a-beaglebone)
+- [17. Riesgos y mitigaciones](#17-riesgos-y-mitigaciones)
+- [18. Bitácora de sesiones](#18-bitácora-de-sesiones)
+- [19. Próximo paso](#19-próximo-paso)
+- [Isaac — Cómo seguir con la parte física](#isaac)
+
+---
+
+<a name="estado-actual"></a>
+## Estado actual (2026-11-16)
+
+La implementación activa es C99 y cubre las fases 0 a 5 del plan de
+[`fases.md`](fases.md). La parte física real es la fase 6 y queda a cargo de
+Isaac; el detalle está en la sección [Isaac](#isaac).
+
+| Fase | Estado |
+|---|---|
+| Fase 0 — Contratos y configuración | Completada |
+| Fase 1 — Recepción genérica con canal falso | Completada |
+| Fase 2 — Canales GPIO y nodo con enlace falso | Completada |
+| Fase 3 — Identidad y relay | Completada |
+| Fase 4 — Gateway de la PC y HTML | Completada |
+| Fase 5 — Prueba integral de software | Completada |
+| Fase 6 — Conexión física y prueba real | Pendiente (Isaac) |
+| Fase 7 — ACK/NACK y retransmisión | Pendiente |
+
+### Qué está funcionando
+
+- Dos nodos C `phy_node`, uno para A y otro para B.
+- Enlace de luz con reloj directo por GPIO, dos pulsos por bit y recepción por
+  ADC.
+- Trama PHY de 44 bits: SYN, SFD, CONTROL, SEQ, DATA y CRC.
+- Identidad de usuario con frames `HELLO` antes de cada mensaje `DATA`.
+- HTML con nombre de usuario, modos `Tramas PHY` y `Bits sin trama`, envío de
+  mensajes y polling del inbox.
+- Gateway HTTP en la PC que habla con la API TCP del nodo A.
+- Enlace falso bidireccional y simulador A/B para pruebas sin hardware.
+- Prueba integral de la fase 5 con acentos Latin-1, usuarios distintos, CRC
+  corrupto, trama incompleta y medición de tiempo.
+
+Alcance actual: enlace por luz. Sonido y vibración quedan fuera de esta
+primera versión y no forman parte de la fase 6.
+
+### Mapa de archivos principal
+
+| Archivo | Función |
+|---|---|
+| `c/include/phy_protocol.h` | Trama, controles, CRC y presentación |
+| `c/src/frame.c` | Construcción y validación de la trama de 44 bits |
+| `c/src/crc8.c` | CRC-8 SMBUS, MAXIM-DOW, SAE-J1850 y AUTOSAR |
+| `c/src/presentation.c` | UTF-8 y Latin-1 |
+| `c/src/phy_gpio.c` | Acceso GPIO por sysfs |
+| `c/src/phy_analog.c` | Lectura del ADC |
+| `c/src/phy_gpio_tx_channel.c` | TX de luz con dos pulsos por bit |
+| `c/src/phy_light_rx_channel.c` | RX de luz con reloj externo y ADC |
+| `c/src/phy_node.c` | Hilos RX/TX, cola, eventos y API TCP |
+| `c/tools/phy_node.c` | Binario del nodo para la BeagleBone |
+| `c/src/phy_fake_link.c` | Enlace falso bidireccional |
+| `c/tools/phy_sim.c` | Simulador A/B con APIs TCP |
+| `servers/local/local_server.py` | Gateway HTTP de la PC |
+| `servers/local/index.html` | Interfaz HTML del chat |
+| `scripts/test_fase5.py` | Prueba integral de la fase 5 |
+| `config/node_a.json` | Pines de A (referencia) |
+| `config/node_b.json` | Pines de B (referencia) |
+
+### Comandos actuales
+
+```bash
+make                         # compila phy_chat y phy_node
+make test                    # pruebas C: protocolo, RX y nodo
+make test-nodo               # A/B con enlace falso y API TCP
+make prueba-integral         # prueba integral de la fase 5
+make sim                     # simulador A/B para inspección manual
+make nodo NODE_ROLE=A NODE_PORT=7000
+```
+
+La API del nodo y el gateway local usan el puerto `7000`.
 
 ---
 
@@ -74,24 +172,18 @@ Tomadas de `README.md`:
 - Plataforma objetivo: BeagleBone Black Rev C.
 - Sistema operativo: Debian GNU/Linux 9 Stretch.
 - Kernel: 4.14.108-ti-r119.
-- Python 3: 3.5.3 obligatorio en runtime.
-- Python 2: no utilizar.
-- No usar f-strings.
-- No usar dataclasses.
-- No usar sintaxis o APIs exclusivas de versiones modernas de Python.
-- Priorizar Standard Library.
-- No asumir compatibilidad de las últimas versiones de paquetes.
-- Fijar versiones de dependencias externas si se agregan.
-- Evaluar Adafruit_BBIO 1.1.0 como primera alternativa GPIO.
-- Verificar compatibilidad de GPIO y pines antes de asumir disponibilidad.
-- Considerar pin mux.
-- Evaluar PRU-ICSS del AM3358 como alternativa determinista.
-- Mantener separada la interfaz Python de la implementación GPIO/PRU.
-- No implementar PRU hasta justificarlo con pruebas de temporización.
+- Implementación del nodo: C99, sin dependencias externas.
+- APIs permitidas: POSIX disponibles en Debian Stretch.
+- GPIO por sysfs como primera alternativa.
+- ADC por las entradas IIO del kernel.
+- Hilos de recepción, transmisión y API con `pthread`.
+- No asumir versiones modernas de compilador ni de librerías.
+- Verificar pines, pin mux y disponibilidad antes de conectar.
+- Evaluar PRU-ICSS del AM3358 solo si la medición real lo justifica.
+- Mantener separada la lógica del protocolo del acceso a GPIO/ADC.
 - La migración debe poder ser offline.
-- No copiar el entorno virtual del escritorio.
-- Crear el venv en la BeagleBone.
-- Preparar wheels ARM compatibles con Python 3.5 si se usan dependencias.
+- El gateway local de la PC usa Python 3 y se mantiene compatible con 3.5.3.
+- No usar f-strings ni APIs modernas en el gateway.
 - Separar dependencias de desarrollo y hardware.
 
 Antes de la migración verificar en la BeagleBone:
@@ -99,13 +191,14 @@ Antes de la migración verificar en la BeagleBone:
 ```bash
 uname -m
 dpkg --print-architecture
-python3 --version
-pip3 --version
-ls /dev/gpiochip* 2>/dev/null
-ls /sys/class/remoteproc 2>/dev/null
+gcc --version
+make --version
+ls -l /sys/class/gpio
+ls -l /sys/bus/iio/devices
+ls -l /sys/class/remoteproc
 ```
 
-La prioridad es que el backend funcione en el hardware existente, sin modernizar
+La prioridad es que el nodo funcione en el hardware existente, sin modernizar
 el sistema operativo innecesariamente.
 
 ---
@@ -142,6 +235,12 @@ Notas:
 - La selección de CRC y codificación debe coincidir en ambos extremos. Una
   negociación automática queda como mejora opcional.
 
+Estado implementado en las fases 0 a 5: enlace por luz con 1 reloj y 1 dato
+por sentido, `clock_hz=20`, identidad por `HELLO`, relay en A y gateway HTML.
+El enlace de luz todavía no tiene ACK/NACK; TCP cubre PC ↔ A y la fase 7
+agregará confiabilidad al enlace A ↔ B. Sonido, vibración y los tres carriles
+quedan fuera de la primera versión.
+
 ---
 
 ## 5. Arquitectura de software
@@ -150,87 +249,61 @@ Notas:
 capa_fisica/
 ├── README.md
 ├── implementacion.md
+├── fases.md
+├── Makefile
 ├── config/
-│   ├── config.sim.json
-│   └── config.beagle.json
-├── capa_fisica/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── protocol/
-│   │   ├── crc.py
-│   │   ├── frame.py
-│   │   ├── presentation.py
-│   │   └── protocol_log.py
-│   ├── phy/
-│   │   ├── bitstream.py
-│   │   ├── sync.py
-│   │   └── transceiver.py
-│   ├── link/
-│   │   └── arq.py
-│   ├── transport/
-│   │   ├── base.py
-│   │   ├── sim.py
-│   │   ├── gpio_sysfs.py
-│   │   └── gpio_adafruit.py
-│   └── app/
-│       ├── chat_service.py
-│       └── web_server.py
-├── web/
-│   ├── index.html
-│   ├── app.js
-│   └── style.css
-├── tools/
-│   ├── terminal_chat.py
-│   ├── gpio_probe.py
-│   └── check_py35.py
-├── tests/
-│   ├── test_crc.py
-│   ├── test_frame.py
-│   ├── test_presentation.py
-│   ├── test_bitstream.py
-│   ├── test_link.py
-│   └── test_e2e.py
+│   ├── node_a.json
+│   ├── node_b.json
+│   └── config.sim.json          # esquema histórico
+├── c/
+│   ├── Makefile
+│   ├── include/
+│   ├── src/
+│   ├── tools/
+│   └── tests/
+├── servers/
+│   ├── local/
+│   │   ├── local_server.py
+│   │   ├── index.html
+│   │   └── translator.js
+│   └── beagle/
+│       └── beagle_server.py     # diagnóstico de BITS
 ├── docs/
-│   ├── arquitectura.md
-│   ├── trama.md
-│   ├── medios_fisicos.md
-│   ├── gpio.md
-│   └── pruebas.md
+│   └── servidores.md
 └── scripts/
-    ├── test.sh
-    └── package.sh
+    └── test_fase5.py
 ```
 
 La estructura puede crecer, pero se debe mantener la separación por capas.
 
 ### Flujo de datos
 
-Transmisión:
+Transmisión actual:
 
 ```text
-Texto de usuario
-  -> Presentación (UTF-8 o Latin-1)
-  -> bytes de 8 bits
-  -> Enlace (SEQ, ACK/NACK, reintentos)
+Texto + usuario
+  -> Presentación Latin-1
+  -> frames HELLO (usuario) y DATA (texto)
   -> Trama PHY (SYN, SFD, CONTROL, SEQ, DATA, CRC)
-  -> Bitstream y carriles
-  -> Transporte (simulación o GPIO)
-  -> Medio físico
+  -> Canal TX de luz (dos pulsos por bit)
+  -> LED y reloj GPIO
 ```
 
-Recepción:
+Recepción actual:
 
 ```text
-Medio físico
-  -> Transporte
-  -> Muestreo de carriles y reloj
-  -> Reconstrucción de bits
-  -> Búsqueda de SYN/SFD
-  -> Frame y verificación CRC
-  -> Enlace (ACK/NACK, deduplicación)
-  -> Presentación (decodificación incremental)
-  -> Texto en la interfaz
+Luz y reloj externo
+  -> Muestreo ADC (s1, s2) por pulso
+  -> Decodificación del par
+  -> 44 bits por frame
+  -> Validación SYN/SFD/CRC
+  -> HELLO actualiza el usuario / DATA acumula el texto
+  -> Evento MESSAGE
+  -> Gateway local y HTML
 ```
+
+ACK/NACK y retransmisión sobre luz no están implementados todavía; quedan
+para la fase 7. TCP cubre la confiabilidad entre la PC y el nodo A.
 
 ---
 
@@ -514,91 +587,86 @@ bloqueando la vibración) y se capturará el LOG.
 - Interfaz HTML/CSS/JS servida localmente.
 - Comunicación con el backend mediante polling HTTP.
 
-Funciones mínimas:
+Funciones implementadas:
 
-- Ver mensajes recibidos.
-- Escribir y enviar mensajes.
-- Seleccionar codificación: UTF-8 o Latin-1.
-- Seleccionar CRC: SMBUS, MAXIM-DOW, SAE-J1850 o AUTOSAR.
-- Ver estado del enlace.
-- Ver LOG del protocolo.
-- Ver contadores de frames, errores, ACK, NACK y retransmisiones.
-- En modo simulación, activar inyección de errores.
+- Pedir el nombre de usuario al iniciar.
+- Ver mensajes recibidos con su usuario y origen.
+- Escribir y enviar mensajes con usuario.
+- Modo `Tramas PHY`: envía `HELLO` + `DATA` al nodo A.
+- Modo `Bits sin trama`: envía bits crudos con `BITS`.
+- Polling del inbox cada 800 ms.
 
-Endpoints previstos:
+Pendiente para fases posteriores: selección de codificación/CRC desde el HTML,
+panel de estado y LOG, e inyección de fallas desde la interfaz. ACK/NACK y
+retransmisión son fase 7.
+
+Endpoints actuales:
 
 | Método | Ruta | Función |
 |---|---|---|
 | GET | `/` | Página de chat |
-| GET | `/api/messages` | Mensajes nuevos |
-| POST | `/api/send` | Enviar mensaje |
-| GET | `/api/status` | Estado y contadores |
-| GET | `/api/log` | Eventos del protocolo |
-| POST | `/api/config` | Cambiar codificación/CRC |
-| POST | `/api/fault` | Inyectar error en simulación |
+| GET | `/translator.js` | Conversión español/ASCII/binario |
+| GET | `/api/ping` | `PING` al nodo A |
+| GET | `/api/inbox?since=N` | Mensajes recibidos (`MESSAGE`) |
+| POST | `/api/message` | Envía `{"user":"ana","text":"hola"}` con `SEND` |
+| POST | `/api/bits` | Envía bits crudos con `BITS` |
+| POST/GET | `/api/frames` | Diagnóstico legado del emisor C |
 
 Modelo de hilos:
 
-- Hilo del servidor HTTP.
-- Hilo receptor del enlace.
-- Hilo transmisor o cola de transmisión.
-- Colas `queue.Queue` para mensajes y eventos.
-- El servidor web no debe acceder directamente a GPIO.
+- Servidor HTTP con `ThreadingHTTPServer`.
+- Conexión TCP persistente y serializada hacia la API del nodo A.
+- Nodo A: hilo de recepción, hilo de transmisión, cola y API TCP.
+- El servidor web no accede directamente a GPIO.
 
 ---
 
 ## 12. Configuración
 
-Archivo JSON, sin dependencias externas.
+La configuración de referencia está en `config/node_a.json` y
+`config/node_b.json`. El binario actual `phy_node` recibe pines, puerto y
+umbrales por línea de comandos; los JSON documentan los valores esperados.
 
-Ejemplo para simulación:
+Ejemplo de A:
 
 ```json
 {
-  "node_id": "A",
-  "transport": "sim",
-  "phy": {
-    "data_lanes": 3,
-    "clock_hz": 100,
-    "sample_edge": "rising",
-    "idle_gap_cycles": 2
-  },
-  "protocol": {
-    "encoding": "utf-8",
-    "crc": "smbus",
-    "timeout_ms": 1000,
-    "max_retries": 3
-  },
+  "node": "A",
+  "role": "gateway",
+  "reachable_from_pc": true,
   "tx": {
-    "clock": {"pin": "SIM_CLK", "medium": "gpio-directo"},
-    "lanes": [
-      {"lane": 0, "medium": "luz", "pin": "SIM_TX0"},
-      {"lane": 1, "medium": "sonido", "pin": "SIM_TX1"},
-      {"lane": 2, "medium": "vibracion", "pin": "SIM_TX2"}
-    ]
+    "clock": { "gpio": 44, "pin": "P8_12", "direction": "out" },
+    "data": { "gpio": 60, "pin": "P9_12", "medium": "luz" }
   },
   "rx": {
-    "clock": {"pin": "SIM_CLK", "medium": "gpio-directo"},
-    "lanes": [
-      {"lane": 0, "medium": "luz", "pin": "SIM_RX0"},
-      {"lane": 1, "medium": "sonido", "pin": "SIM_RX1"},
-      {"lane": 2, "medium": "vibracion", "pin": "SIM_RX2"}
-    ]
+    "clock": { "gpio": 45, "pin": "P8_11", "direction": "in" },
+    "data": { "ain": 0, "pin": "P9_39", "medium": "luz" }
   },
-  "web": {
-    "host": "0.0.0.0",
-    "port": 8080
-  }
+  "clock_hz": 20.0,
+  "pulses_per_bit": 2,
+  "encoding": "latin-1",
+  "crc": "smbus",
+  "api": { "host": "0.0.0.0", "port": 7000 }
 }
 ```
 
-Los pines reales de la BeagleBone se definirán en la fase de hardware y se
-documentarán en `docs/gpio.md`. No se deben usar pines ocupados por HDMI, eMMC u
-otras funciones sin verificar el pin mux.
+En B se intercambian los GPIO de clock: TX usa gpio45/P8_11 y RX usa
+gpio44/P8_12. El resto de los pines coincide.
+
+`config/config.sim.json` conserva el esquema histórico de simulación de tres
+carriles. El simulador actual `phy_sim` toma `--a-port`, `--b-port` y
+`--clock-hz` por línea de comandos.
+
+No se deben usar pines ocupados por HDMI, eMMC u otras funciones sin verificar
+el pin mux.
 
 ---
 
 ## 13. Plan por fases
+
+> Nota: este plan de 8 fases es el plan histórico inicial. El seguimiento
+> activo de las fases 0 a 7 está en [`fases.md`](fases.md) y en la sección
+> [Estado actual](#estado-actual). La fase 6 se detalla en [Isaac](#isaac).
 
 ### Fase 0 — Especificación y andamiaje
 
@@ -710,314 +778,280 @@ descubren.
 
 ## 14. Estrategia de pruebas
 
-### 14.1 Pruebas unitarias locales
+### 14.1 Pruebas unitarias C
 
 ```bash
-python3 -m unittest discover -s tests -v
+make test
 ```
 
-Cubren:
+Incluye:
 
-- CRC con vector `"123456789"`.
-- Trama: campos, orden de bits, cobertura CRC, ACK/NACK.
-- Presentación: ASCII, acentos, emojis, chino, Latin-1, bytes inválidos.
-- Bitstream: carriles, relleno, reconstrucción, búsqueda de SYN/SFD.
-- Enlace: ACK, NACK, timeout, reintentos, duplicados.
-- Integración: dos nodos simulados.
+- `test_protocol`: CRC, trama de 44 bits, SYN/SFD, presentación UTF-8 y
+  Latin-1, relleno por carriles y vectores conocidos.
+- `test_rx`: recepción con canal falso, frame válido, CRC alterado, SYN
+  inválido, mensaje ASCII, mensaje Latin-1 y timeouts.
+- `test_node`: dos nodos A/B con enlace falso, API TCP, `SEND`, `BITS`,
+  identidad por `HELLO`, relay y recepción concurrente con transmisión.
 
-### 14.2 Compatibilidad Python 3.5
+### 14.2 Pruebas con enlace falso
 
 ```bash
-python3 tools/check_py35.py
+make test-nodo
 ```
 
-El script debe:
+Verifica:
 
-- Parsear el código con gramática de Python 3.5.
-- Detectar f-strings.
-- Detectar dataclasses.
-- Detectar sintaxis moderna.
-- Listar importaciones incompatibles conocidas.
+- `SEND` de A llega como mensaje a B.
+- `SEND` de B llega como mensaje a A.
+- `BITS` sigue enviando bits crudos.
+- La recepción no se bloquea mientras el nodo transmite.
 
-Si hay red disponible:
+### 14.3 Prueba integral de la fase 5
 
 ```bash
-docker run --rm -v "$PWD:/app" -w /app python:3.5 \
-  python -m unittest discover -s tests -v
+make prueba-integral
 ```
 
-Si no hay red, usar el chequeo estático y evitar APIs modernas.
+El script `scripts/test_fase5.py` levanta `phy_sim` con A y B unidos por el
+enlace falso, arranca el gateway HTTP y prueba:
 
-### 14.3 Pruebas de terminal a terminal
+- HTML -> A -> B.
+- Terminal de B -> A -> HTML.
+- Acentos Latin-1 en ambos sentidos.
+- Usuarios distintos.
+- Frame con CRC corrupto registrado sin romper el nodo.
+- Trama incompleta sin generar mensaje y con recuperación posterior.
+- Medición de tiempo con dos pulsos por bit y `clock_hz`.
 
-Las primeras pruebas no usan Web ni hardware. Validan el recorrido:
+### 14.4 Pruebas de hardware (fase 6)
+
+En la BeagleBone:
+
+```bash
+make probe-luz SUDO=sudo PROBE_ARGS="--led --blink 0.5"
+make rx-luz SUDO=sudo PROBE_ARGS="--pattern 1110 --clock-hz 2"
+sudo ./c/phy_node --role A --port 7000 --trace
+sudo ./c/phy_node --role B --port 7000 --trace
+```
+
+El procedimiento completo de cableado, calibración y criterios de aceptación
+está en la sección [Isaac](#isaac).
+
+### 14.5 Prueba de error intencional
+
+La prueba integral inyecta un frame con CRC inválido y una trama incompleta
+desde la API de B:
+
+- El CRC inválido debe aparecer como `RX ... status=CRC invalido`.
+- El nodo debe seguir respondiendo `PING`.
+- Una trama incompleta no debe generar `MESSAGE`.
+- Después de ambos errores, un mensaje válido debe seguir llegando.
+
+### 14.6 Resultados actuales
 
 ```text
-texto -> bytes -> frames -> carriles -> frames -> bytes -> texto
+$ make test
+OK: pruebas de CRC, trama y presentacion
+OK: recepcion de tramas y mensajes
+OK: nodo A/B con enlace falso y API TCP
+
+$ make prueba-integral
+OK: A -> B: mensaje en la terminal de B
+OK: B -> A -> HTML: mensaje en el inbox
+OK: A -> B conserva acentos Latin-1
+OK: B -> A -> HTML conserva acentos Latin-1
+OK: el tiempo medido respeta los dos pulsos por bit
+OK: el nodo A registra el CRC invalido
+OK: la trama incompleta no genera un mensaje
+OK: prueba integral de la fase 5
 ```
-
-Pipeline:
-
-```bash
-printf 'Hola, mundo\n' | \
-  python3 tools/terminal_chat.py tx --encoding utf-8 --crc smbus | \
-  python3 tools/terminal_chat.py rx --encoding utf-8 --crc smbus
-```
-
-Dos terminales usando un FIFO:
-
-```bash
-mkfifo /tmp/phy_link
-python3 tools/terminal_chat.py rx --encoding utf-8 --crc smbus < /tmp/phy_link
-python3 tools/terminal_chat.py tx --encoding utf-8 --crc smbus > /tmp/phy_link
-```
-
-Casos iniciales:
-
-- ASCII simple.
-- Acentos y eñe.
-- Emoji de 4 bytes.
-- Caracteres chinos de 3 bytes.
-- Latin-1.
-- Frame corrupto: debe fallar CRC y reportar error.
-- Verificación de relleno con 3 carriles.
-
-### 14.4 Pruebas en BeagleBone
-
-```bash
-python3 -m unittest discover -s tests -v
-python3 tools/gpio_probe.py --config config/config.beagle.json
-python3 tools/terminal_chat.py --help
-```
-
-Luego:
-
-```bash
-python3 run.py --config config/config.beagle.json
-```
-
-### 14.5 Prueba de error físico
-
-1. Iniciar chat.
-2. Enviar un mensaje.
-3. Interferir el medio de un carril.
-4. Verificar en el LOG: CRC_FAIL, NACK, RETRY, ACK.
-5. Confirmar que el mensaje se entrega una sola vez.
-
-### 14.6 Resultados de la sesión actual
-
-Implementado y verificado:
-
-- Paquete `capa_fisica` con módulos de CRC, trama, presentación y bitstream.
-- CRC-8 con los cuatro algoritmos y vectores check.
-- Trama de 44 bits con SYN, SFD, CONTROL, SEQ, DATA y CRC.
-- Relleno de carriles para `K = 2..7`.
-- Búsqueda básica de SYN/SFD en un flujo de bits.
-- UTF-8 incremental de 1 a 4 bytes y Latin-1.
-- Herramienta `tools/terminal_chat.py` con modos `tx`, `rx` y `loopback`.
-- Inyección de error para demostrar CRC inválido.
-- 46 tests unitarios y de integración.
-
-Resultados:
-
-```text
-python3 -m unittest discover -s tests -v
-Ran 46 tests in 0.695s
-OK
-
-python3 tools/check_py35.py
-OK: 15 files are compatible with Python 3.5 grammar
-```
-
-También se ejecutaron los 46 tests dentro de un contenedor con Python 3.5:
-
-```text
-podman run --rm -v "$PWD:/app:Z" -w /app python:3.5 \
-  python -m unittest discover -s tests -v
-Ran 46 tests in 0.453s
-OK
-```
-
-Prueba terminal a terminal exitosa:
-
-```text
-printf 'Hola, señor 😀\n' | \
-  python3 tools/terminal_chat.py tx --encoding utf-8 --crc autosar --lanes 3 | \
-  python3 tools/terminal_chat.py rx --encoding utf-8 --crc autosar --lanes 3
-```
-
-La salida reconstruida fue `Hola, señor 😀`.
-
-Prueba de error:
-
-```text
-printf 'abc\n' | \
-  python3 tools/terminal_chat.py tx --crc smbus --lanes 3 --corrupt-frame 1 --quiet | \
-  python3 tools/terminal_chat.py rx --crc smbus --lanes 3 --quiet
-```
-
-El receptor reportó `CRC mismatch` y descartó el byte corrupto. La salida fue
-`ac` (el byte `b` se perdió). Esta prueba es la base para el futuro NACK y la
-retransmisión de la Fase 3.
-
-### 14.7 Makefile general interactivo
-
-El archivo `Makefile` permite levantar emisor y receptor en dos terminales y
-escribir mensajes desde el teclado.
-
-Terminal 1, receptor:
-
-```bash
-make receptor
-```
-
-Terminal 2, emisor:
-
-```bash
-make emisor
-```
-
-En la terminal del emisor se escribe el mensaje y se presiona Enter. El emisor
-envía el texto byte por byte; el receptor lo muestra carácter por carácter.
-
-Al recibir el delimitador `\n`, el receptor reconstruye el mensaje completo y
-lo informa explícitamente:
-
-```text
-[RECEPTOR] TEXTO recibido='h'
-[RECEPTOR] TEXTO recibido='o'
-[RECEPTOR] TEXTO recibido='l'
-[RECEPTOR] TEXTO recibido='a'
-[RECEPTOR] TEXTO recibido='\n'
-[RECEPTOR] MENSAJE COMPLETO (4 caracteres): 'hola'
-```
-
-Si la conexión termina antes del delimitador, se informa como mensaje
-incompleto.
-
-Ambas terminales muestran la traza del protocolo:
-
-- SYN y SFD.
-- CONTROL, SEQ y DATA.
-- Cálculo y verificación del CRC.
-- ACK y NACK.
-- Timeouts.
-- Reintentos.
-- Duplicados.
-- Errores de conexión.
-
-Ejemplo de error intencional para ver CRC -> NACK -> retransmisión:
-
-```bash
-make emisor CORRUPT_FRAME=1
-```
-
-El receptor detecta el CRC inválido, responde NACK, el emisor retransmite y el
-mensaje se entrega una sola vez.
-
-Variables del `Makefile`:
-
-- `PYTHON`
-- `ENCODING`
-- `CRC`
-- `LANES`
-- `HOST`
-- `BIND`
-- `PORT`
-- `TIMEOUT`
-- `RETRIES`
-- `QUIET`
-- `CORRUPT_FRAME`
-- `CORRUPT_BIT`
-
-Para dos computadoras:
-
-```bash
-make receptor BIND=0.0.0.0
-```
-
-```bash
-make emisor HOST=192.168.1.50
-```
-
-El socket TCP se usa solamente como transporte de prueba local. La Capa Física
-real seguirá siendo la de medios no convencionales y GPIO.
-
-### 14.8 Makefiles de archivo y FIFO
-
-También se incluyen dos Makefiles auxiliares para pruebas no interactivas:
-
-- `Makefile.emisor`
-- `Makefile.receptor`
-
-Ayuda:
-
-```bash
-make -f Makefile.emisor ayuda
-make -f Makefile.receptor ayuda
-```
-
-Enviar un mensaje a archivo:
-
-```bash
-make -f Makefile.emisor archivo \
-  MENSAJE="Hola, señor" \
-  SALIDA=frames.jsonl
-```
-
-Recibir desde archivo:
-
-```bash
-make -f Makefile.receptor recibir ENTRADA=frames.jsonl
-```
-
-Ver las tramas generadas:
-
-```bash
-make -f Makefile.emisor tramas MENSAJE="Hola"
-```
-
-Probar un error de CRC:
-
-```bash
-make -f Makefile.emisor archivo \
-  MENSAJE="abc" \
-  SALIDA=frames_bad.jsonl \
-  CORRUPT_FRAME=1
-
-make -f Makefile.receptor recibir ENTRADA=frames_bad.jsonl
-```
-
-Dos terminales usando FIFO:
-
-```bash
-make -f Makefile.receptor escuchar FIFO=/tmp/phy_link
-```
-
-```bash
-make -f Makefile.emisor interactivo > /tmp/phy_link
-```
-
-Variables disponibles: `PYTHON`, `ENCODING`, `CRC`, `LANES`, `SEQ_START`,
-`QUIET`, `MENSAJE`, `SALIDA`, `ENTRADA`, `FIFO` y `CORRUPT_FRAME`.
 
 ---
 
-## 15. Migración a BeagleBone
+## 15. Implementación en C
+
+La implementación activa del nodo está en C99. Usa `pthread`, GPIO por sysfs,
+ADC por IIO y no depende de bibliotecas externas. El camino del chat es:
+
+```text
+HTML -> servidor local -> API TCP del nodo A -> enlace de luz -> nodo B
+nodo B -> enlace de luz -> nodo A -> POLL/inbox -> servidor local -> HTML
+```
+
+La variante `phy_chat` con transporte TCP queda como herramienta de
+diagnóstico del protocolo.
+
+### 15.1 Estructura
+
+```text
+c/
+├── Makefile
+├── include/
+│   ├── phy_protocol.h
+│   ├── phy_channel.h
+│   ├── phy_rx_channel.h
+│   ├── phy_rx.h
+│   ├── phy_node.h
+│   ├── phy_fake_link.h
+│   ├── phy_gpio.h
+│   ├── phy_analog.h
+│   └── phy_net.h
+├── src/
+│   ├── crc8.c
+│   ├── frame.c
+│   ├── presentation.c
+│   ├── phy_gpio.c
+│   ├── phy_analog.c
+│   ├── phy_gpio_tx_channel.c
+│   ├── phy_light_rx_channel.c
+│   ├── phy_rx.c
+│   ├── phy_rx_channel.c
+│   ├── phy_fake_rx_channel.c
+│   ├── phy_fake_link.c
+│   ├── phy_node.c
+│   └── net.c
+├── tools/
+│   ├── phy_node.c
+│   ├── phy_sim.c
+│   └── phy_light_tx.c
+└── tests/
+    ├── test_protocol.c
+    ├── test_rx.c
+    └── test_node.c
+```
+
+- `phy_node.c`: nodo con hilo RX, cola TX, log de eventos, identidad y API TCP.
+- `phy_gpio_tx_channel.c`: transmisión por LED con dos pulsos por bit.
+- `phy_light_rx_channel.c`: recepción por ADC usando el reloj externo.
+- `phy_fake_link.c`: enlace falso con temporización opcional de dos pulsos.
+- `phy_sim.c`: levantamiento de A y B simulados con APIs TCP.
+- `phy_rx.c`: sincronización, 44 bits, CRC y reconstrucción del mensaje.
+- `chat.c`: emisor/receptor TCP de diagnóstico con ARQ stop-and-wait.
+
+### 15.2 Compilación y uso
+
+```bash
+make                         # compila phy_chat y phy_node
+make test                    # pruebas C: protocolo, RX y nodo
+make test-nodo               # A/B con enlace falso y API TCP
+make prueba-integral         # prueba integral de la fase 5
+make sim                     # simulador A/B sin hardware
+make nodo NODE_ROLE=A NODE_PORT=7000
+```
+
+Nodo real en la Beagle:
+
+```bash
+sudo ./c/phy_node --role A --port 7000 --trace
+sudo ./c/phy_node --role B --port 7000 --trace
+```
+
+Gateway de la PC:
+
+```bash
+python3 servers/local/local_server.py
+```
+
+Variables y opciones principales: `NODE_ROLE`, `NODE_PORT`, `NODE_BIND`,
+`ENCODING`, `CRC`, `--clock-hz`, `--on-level`, `--off-level`,
+`--adc-samples` y `--adc-interval-ms`.
+
+La variante `make emisor`/`make receptor` sigue disponible para probar
+`phy_chat` por TCP sin hardware.
+
+### 15.3 Paridad con la versión Python
+
+La versión C reproduce el mismo comportamiento:
+
+- Misma trama PHY de 44 bits y mismo relleno por carriles.
+- Mismos CRC y mismos valores de verificación para `"123456789"`.
+- Mismo control `DATA/ACK/NACK/...` y secuencia circular `0..15`.
+- Stop-and-wait con timeout de 1 s, 3 reintentos y deduplicación.
+- Trazas de SYN/SFD/CONTROL/SEQ/DATA/CRC, ACK/NACK, timeout y reintentos.
+- Reconstrucción del mensaje completo al recibir `\n`.
+- UTF-8 multibyte y Latin-1 con conversión para la terminal.
+- Corrupción inducida con `CORRUPT_FRAME` y recuperación CRC -> NACK ->
+  retransmisión -> ACK.
+
+La diferencia está solo en el transporte TCP de prueba: Python usa registros
+JSON y C usa líneas `F <carriles> <bits>`. Por eso, por ahora, un emisor C debe
+hablar con un receptor C. La trama PHY transmitida es la misma.
+
+### 15.4 Verificación histórica de `phy_chat`
+
+```text
+$ make test
+OK: pruebas de CRC, trama y presentacion
+
+$ make receptor
+[RECEPTOR] MENSAJE COMPLETO (10 caracteres): 'hola mundo'
+
+$ make emisor CORRUPT_FRAME=1
+[EMISOR] TX ... CRC=0x1E CALC=0x1F CORRUPTO
+[EMISOR] NACK recibido para SEQ=1
+[EMISOR] REINTENTO 1/3 para SEQ=1
+[EMISOR] ACK SEQ=1 OK
+[RECEPTOR] MENSAJE COMPLETO (12 caracteres): 'Hola señor 😀'
+```
+
+También se verificó Latin-1 con `Mañana`: el emisor convierte UTF-8 a Latin-1,
+transmite `0xF1` y el receptor lo vuelve a mostrar como UTF-8.
+
+### 15.5 Integración con los Makefiles
+
+Objetivos actuales del `Makefile` raíz:
+
+| Objetivo | Función |
+|---|---|
+| `make` | Compila `phy_chat` y `phy_node` |
+| `make test` | Pruebas C de protocolo, RX y nodo |
+| `make test-nodo` | A/B con enlace falso |
+| `make prueba-integral` | Prueba integral de la fase 5 |
+| `make sim` | Simulador A/B con APIs TCP |
+| `make nodo` | Inicia `phy_node` con `NODE_ROLE` y `NODE_PORT` |
+| `make emisor` / `make receptor` | Diagnóstico TCP con `phy_chat` |
+
+### 15.6 Verificación de la fase 5
+
+```text
+$ make prueba-integral
+OK: nodo A simulado disponible
+OK: nodo B simulado disponible
+OK: gateway de la PC conectado al nodo A
+OK: HTML envia el mensaje a A
+OK: A -> B: mensaje en la terminal de B
+OK: terminal de B envia el mensaje a A
+OK: B -> A -> HTML: mensaje en el inbox
+OK: HTML envia texto Latin-1
+OK: A -> B conserva acentos Latin-1
+OK: B -> A -> HTML conserva acentos Latin-1
+OK: el tiempo medido respeta los dos pulsos por bit
+OK: el nodo A registra el CRC invalido
+OK: el nodo sigue vivo despues del CRC invalido
+OK: la trama incompleta no genera un mensaje
+OK: el nodo sigue entregando mensajes despues de la trama incompleta
+
+OK: prueba integral de la fase 5
+```
+
+---
+
+## 16. Migración a BeagleBone
 
 Checklist:
 
-- [ ] Confirmar arquitectura y versión de Python.
-- [ ] Verificar repositorios disponibles.
-- [ ] Crear venv en la BeagleBone.
-- [ ] No copiar el venv del escritorio.
-- [ ] Preparar paquetes offline si hacen falta.
-- [ ] Verificar Adafruit_BBIO 1.1.0 si se usa.
-- [ ] Verificar permisos de GPIO.
-- [ ] Configurar pin mux.
-- [ ] Probar entradas y salidas una por una.
+- [x] Implementar el nodo en C99.
+- [x] Probar A/B con enlace falso.
+- [x] Probar el gateway HTML sin hardware.
+- [ ] Copiar las fuentes a la Beagle A y a la Beagle B.
+- [ ] Compilar directamente en cada Beagle con `make`.
+- [ ] Verificar `gcc`, `make`, `/sys/class/gpio` y `/sys/bus/iio/devices`.
+- [ ] Liberar los pines y revisar el pin mux.
+- [ ] Probar el LED y el sensor de luz de cada equipo.
+- [ ] Calibrar `--on-level` y `--off-level`.
+- [ ] Ajustar `--clock-hz`, `--adc-samples` y `--adc-interval-ms`.
 - [ ] Medir frecuencia y jitter reales.
-- [ ] Documentar incompatibilidades.
+- [ ] Documentar incompatibilidades y valores usados.
 
 Comandos de diagnóstico:
 
@@ -1025,36 +1059,36 @@ Comandos de diagnóstico:
 uname -a
 uname -m
 dpkg --print-architecture
-python3 --version
-pip3 --version
+gcc --version
+make --version
 ls -l /sys/class/gpio
-ls -l /dev/gpiochip*
+ls -l /sys/bus/iio/devices
 ls -l /sys/class/remoteproc
 ```
 
-El backend GPIO debe quedar detrás de una interfaz, de modo que el simulador y
-la BeagleBone sean intercambiables sin tocar las capas superiores.
+El paso a paso de pines, cableado, calibración y prueba física está en la
+sección [Isaac](#isaac).
 
 ---
 
-## 16. Riesgos y mitigaciones
+## 17. Riesgos y mitigaciones
 
 | Riesgo | Mitigación |
 |---|---|
-| Timing de GPIO en Python es lento o irregular | Reloj lento inicial, muestreo source-synchronous, medición real, PRU solo si se justifica |
-| Diferencia Python 3.14 local vs 3.5.3 objetivo | `check_py35.py`, evitar APIs modernas, Docker 3.5 si hay red |
-| Medios analógicos inestables | Circuitos de acondicionamiento, comparadores, pruebas por canal |
-| Interferencia entre canales | Medios distintos, separación física, blindaje y pruebas |
-| Reloj directo requiere referencia de tierra | Documentar conexión, usar interfaz adecuada y probar con ambos equipos |
-| Pines ocupados o pin mux incorrecto | Inventario de pines y `gpio_probe.py` antes de integrar |
-| Pérdida de sincronización | Idle gap, SYN/SFD, resincronización y LOG |
-| ACK/NACK lentos por stop-and-wait | Aceptable para chat; subir reloj si el hardware lo permite |
+| Timing de GPIO por sysfs es lento o irregular | `clock_hz` bajo (20 Hz), muestreo source-synchronous y medición real; PRU solo si se justifica |
+| Diferencia entre la PC y Python 3.5.3 | Evitar APIs modernas en el gateway y probar con `python3` de la Beagle si se migra |
+| ADC saturado o con ruido | Calibrar umbrales, usar promedio y revisar la referencia de 1.8 V |
+| Medios analógicos inestables | Circuitos de acondicionamiento, comparadores y prueba por canal |
+| Reloj directo requiere referencia de tierra | Unir GND de ambos equipos y verificar el cableado |
+| Pines ocupados o pin mux incorrecto | Revisar `/sys/class/gpio` y `phy_node --trace` antes de integrar |
+| Pérdida de sincronización | Reloj directo, dos pulsos por bit, SYN/SFD y reloj real medido |
+| ACK/NACK lentos por stop-and-wait | No implementado todavía; queda para la fase 7 |
 | Selección distinta de CRC/codificación | Configuración explícita y validación al iniciar |
 | Repositorio git mezclado con el home | Mantener el proyecto aislado y agregar `.gitignore` |
 
 ---
 
-## 17. Bitácora de sesiones
+## 18. Bitácora de sesiones
 
 | Fecha | Avance | Pendiente |
 |---|---|---|
@@ -1063,23 +1097,233 @@ la BeagleBone sean intercambiables sin tocar las capas superiores.
 | 2026-11-13 | Agregados `Makefile.emisor` y `Makefile.receptor` para pruebas terminal a terminal, envío a archivo, FIFO y demostración de CRC inválido. | Integrar los Makefiles al flujo con simulador y enlace ARQ |
 | 2026-11-13 | Agregado `Makefile` general con emisor/receptor interactivos por TCP, traza SYN/SFD/DATA/CRC, ACK/NACK, timeout, reintentos, deduplicación y corrupción inducida. Verificado `hola` carácter por carácter y recuperación CRC -> NACK -> retransmisión. | Reemplazar el transporte TCP de prueba por el simulador/GPIO de la Capa Física |
 | 2026-11-13 | El receptor acumula el texto decodificado y reconstruye el mensaje completo al recibir `\n`, incluyendo UTF-8 multibyte y aviso de mensaje incompleto. Verificado con `hola mundo` y `Hola señor 😀`. | Extraer el acumulador de mensajes a la capa de aplicación reutilizable |
+| 2026-11-14 | Portada la lógica de mensajes a C99 en `c/`: CRC, trama, presentación UTF-8/Latin-1, transporte TCP de prueba, ARQ stop-and-wait, logs y reconstrucción del mensaje. `make emisor`/`make receptor` usan C por defecto; Python queda como referencia. Verificado C-C con `hola mundo`, `Hola señor 😀` y Latin-1 `Mañana`, incluyendo corrupción -> NACK -> reintento -> ACK. | Implementar el backend GPIO y conectar el transporte al simulador/BeagleBone |
+| 2026-11-15 | Fases 0 a 2: configuraciones A/B, `phy_rx` con canal falso, canal TX GPIO con dos pulsos por bit, canal RX de luz con clock externo y ADC, nodo `phy_node` con hilos RX/TX y API TCP, enlace falso bidireccional y pruebas A/B. | Probar identidad de usuario y relay |
+| 2026-11-15 | Fase 3: usuario guardado en la conexión TCP, frames `HELLO` antes de cada mensaje, asociación del usuario en B y cola de mensajes recibidos en A para el inbox. `phy_node` reemplaza a `beagle_server.py` en el camino del chat. | Gateway HTTP y HTML |
+| 2026-11-15 | Fase 4: gateway local contra la API del nodo, `POST /api/message`, `GET /api/inbox`, usuario en el HTML, polling y modos `Tramas PHY` / `Bits sin trama`. El puerto de trabajo quedó en `7000`. | Prueba integral sin hardware |
+| 2026-11-16 | Fase 5: simulador `phy_sim` con enlace falso y temporización, `make prueba-integral`, pruebas HTML -> A -> B, B -> A -> HTML, Latin-1, usuarios distintos, CRC corrupto, trama incompleta y medición de tiempo con dos pulsos por bit. | Fase 6 física con Isaac |
 
 ---
 
-## 18. Próximo paso
+## 19. Próximo paso
 
-El chat interactivo por TCP ya demuestra recuperación CRC -> NACK ->
-retransmisión. La Fase 2 y la Fase 3 continúan así:
+Las fases 0 a 5 están completas y verificadas sin hardware. El próximo trabajo
+es la fase 6: conectar las dos BeagleBone, calibrar el enlace de luz y validar
+el chat real.
 
-1. Extraer el ARQ stop-and-wait del modo interactivo a un módulo reutilizable
-   de Capa de Enlace.
-2. Implementar el simulador de bus con reloj, latencia e idle.
-3. Implementar la máquina de estados de recepción SYN/SFD con resincronización.
-4. Implementar el transceiver TX/RX sobre el simulador.
-5. Conectar el ARQ al simulador en lugar del socket TCP.
-6. Agregar LOG estructurado persistente.
-7. Repetir la prueba terminal a terminal usando el simulador y demostrar
-   CRC -> NACK -> retransmisión -> ACK.
+El paso a paso, pines, cableado, comandos de calibración y criterios de
+aceptación están en la sección [Isaac](#isaac). La fase 7 (ACK/NACK y
+retransmisión) queda para después de validar el enlace físico.
 
-La meta verificable inmediata es que el mismo comportamiento observado por TCP
-funcione sobre el simulador de la Capa Física y luego sobre GPIO.
+---
+
+<a name="isaac"></a>
+## Isaac — Cómo seguir con la parte física
+
+Esta sección es la guía para la fase 6: conectar las dos BeagleBone, calibrar el
+enlace de luz y validar el chat real. No hay que cambiar la lógica de tramas,
+identidad, relay ni HTML si el hardware responde; el trabajo es de pines,
+cableado, umbrales y tiempos.
+
+### Alcance
+
+- Enlace por luz entre Beagle A y Beagle B.
+- Reloj directo por GPIO y dato por LED/ADC.
+- Dos pulsos de reloj por bit.
+- Chat PC ↔ A ↔ B usando `phy_node`, el gateway local y el HTML.
+- Fuera de alcance: sonido, vibración, ACK/NACK y retransmisión.
+
+### Pines asignados
+
+| Equipo | Señal | GPIO / pin físico | Dirección |
+|---|---|---|---|
+| Beagle A | Clock TX | gpio44 / P8_12 | Salida |
+| Beagle A | Clock RX | gpio45 / P8_11 | Entrada |
+| Beagle A | Dato TX (LED) | gpio60 / P9_12 | Salida |
+| Beagle A | Dato RX | AIN0 / P9_39 | Entrada ADC |
+| Beagle B | Clock TX | gpio45 / P8_11 | Salida |
+| Beagle B | Clock RX | gpio44 / P8_12 | Entrada |
+| Beagle B | Dato TX (LED) | gpio60 / P9_12 | Salida |
+| Beagle B | Dato RX | AIN0 / P9_39 | Entrada ADC |
+
+Cableado:
+
+```text
+A P8_12 (gpio44 salida)  ->  B P8_12 (gpio44 entrada)
+B P8_11 (gpio45 salida)  ->  A P8_11 (gpio45 entrada)
+
+A P9_12 (gpio60 LED)     ->  B P9_39 (AIN0, sensor de luz)
+B P9_12 (gpio60 LED)     ->  A P9_39 (AIN0, sensor de luz)
+
+A GND                    ->  B GND
+```
+
+Alimentación y ADC:
+
+- VDD_ADC: P9_32, 1.8 V.
+- GND_ADC: P9_34.
+- AIN0: P9_39.
+- No aplicar 3.3 V ni 5 V al ADC.
+- Unir las tierras de ambas placas; sin GND común el enlace no es confiable.
+- Verificar la polaridad del LED y del fototransistor/fotodiodo.
+- El LED debe iluminar el sensor del equipo contrario.
+
+### 1. Copiar y compilar
+
+Desde la PC, con la Beagle A accesible por `192.168.7.2`:
+
+```bash
+make -C c clean
+ssh debian@192.168.7.2 'mkdir -p ~/capa_fisica'
+scp -r c config Makefile README.md docs \
+  debian@192.168.7.2:~/capa_fisica/
+ssh debian@192.168.7.2 'cd ~/capa_fisica && make clean && make'
+```
+
+No copiar `c/phy_node` compilado en la PC: es `x86-64`. Compilar en cada
+BeagleBone para generar el binario ARM.
+
+Para B, repetir con su IP si hay acceso de red. Si B no es accesible por red,
+copiar las fuentes por USB o el medio disponible.
+
+### 2. Verificar el entorno
+
+En cada Beagle:
+
+```bash
+uname -a
+uname -m
+gcc --version
+make --version
+ls -l /sys/class/gpio
+ls -l /sys/bus/iio/devices
+```
+
+Si `/sys/class/gpio` no existe o no hay permisos, el nodo debe ejecutarse con
+`sudo`. Si el ADC no aparece, revisar `/sys/bus/iio/devices` y el pin mux de
+AIN0.
+
+### 3. Levantar los nodos
+
+En Beagle A:
+
+```bash
+cd ~/capa_fisica
+sudo ./c/phy_node --role A --port 7000 --trace
+```
+
+En Beagle B:
+
+```bash
+cd ~/capa_fisica
+sudo ./c/phy_node --role B --port 7000 --trace
+```
+
+Opciones útiles para calibrar:
+
+| Opción | Defecto | Uso |
+|---|---|---|
+| `--clock-hz` | `20` | Pulsos de reloj por segundo |
+| `--on-level` | `2100` | Umbral ADC para nivel encendido |
+| `--off-level` | `1700` | Umbral ADC para nivel apagado |
+| `--adc-samples` | `5` | Muestras promediadas por pulso |
+| `--adc-interval-ms` | `2` | Espera entre muestras del ADC |
+
+Los pines por defecto de `--role A` y `--role B` coinciden con la tabla.
+`config/node_a.json` y `config/node_b.json` son la referencia de pines; el
+binario actual recibe los valores por línea de comandos.
+
+### 4. Calibrar LED, sensor y umbrales
+
+Primero probar cada placa por separado:
+
+```bash
+make probe-luz SUDO=sudo PROBE_ARGS="--led --blink 0.5"
+make rx-luz SUDO=sudo PROBE_ARGS="--pattern 1110 --clock-hz 2"
+```
+
+Estas herramientas de diagnóstico usan gpio44, gpio60 y AIN0 en la misma
+placa. Usarlas con el enlace A-B desconectado o sobre la placa A para no
+pisar el reloj de recepción de B.
+
+Para calibrar el enlace real:
+
+1. Encender y apagar el LED del equipo remoto.
+2. Observar los valores del ADC en la placa receptora.
+3. Elegir `--on-level` y `--off-level` entre los valores de luz y oscuridad.
+4. Dejar una histéresis amplia para evitar ruido.
+5. Empezar con `--clock-hz 20`. Si hay CRC inválidos, bajar a `10` o `5`.
+6. Aumentar `--adc-samples` si hay ruido y el pulso alto lo permite.
+7. Recordar que el tiempo de muestreo es aproximadamente
+   `(adc_samples - 1) * adc_interval_ms` y debe entrar en el 40 % alto del pulso.
+
+### 5. Probar el chat real
+
+En la PC:
+
+```bash
+python3 servers/local/local_server.py
+```
+
+El gateway usa por defecto `192.168.7.2:7000`. Verificar:
+
+```bash
+curl http://127.0.0.1:8080/api/ping
+```
+
+Debe responder `{"beagle":"ok","response":"PONG"}`.
+
+Abrir `http://127.0.0.1:8080/`, ingresar el usuario y enviar en modo
+`Tramas PHY`.
+
+En la terminal de B debería aparecer el usuario y el mensaje:
+
+```text
+[B] MESSAGE ... isaac hola
+```
+
+Para enviar desde la terminal de B hacia el HTML:
+
+```bash
+printf 'HELLO isaac\nSEND isaac hola desde B\n' | nc -q 1 127.0.0.1 7000
+```
+
+Luego el HTML debería mostrar el Mensaje en el inbox con usuario `isaac` y
+origen `B`.
+
+### 6. Criterios de aceptación de la fase 6
+
+- A transmite y B recibe.
+- B transmite y A recibe.
+- El HTML muestra los mensajes de ambos equipos.
+- El usuario correcto aparece en el mensaje.
+- El nodo no se cae con un CRC inválido ni con una trama incompleta.
+- No se modifica el protocolo, solo pines, umbrales y `clock_hz`.
+
+### 7. Problemas frecuentes
+
+| Síntoma | Revisar |
+|---|---|
+| `Connection refused` en la PC | El nodo no está en `7000` o no está corriendo |
+| `No se pudo abrir GPIO` | Ejecutar con `sudo` y revisar `/sys/class/gpio` |
+| `No se pudo abrir el receptor de luz` | Ruta del ADC, pin mux de AIN0 y permisos |
+| ADC siempre en 0 o siempre al máximo | Polaridad, divisor, referencia de 1.8 V y GND común |
+| CRC inválidos | Bajar `clock_hz`, ajustar umbrales y promediar más |
+| No hay mensajes en B | Revisar que el LED remoto ilumine el sensor y el clock cruzado |
+| El puerto no aparece | Verificar que el proceso no haya quedado en otro puerto con `ss -ltn` |
+
+### 8. Qué registrar al terminar
+
+Agregar una fila a la bitácora con:
+
+- Pines y cableado usados.
+- Valores finales de `on-level`, `off-level`, `clock_hz`, `adc-samples` y
+  `adc-interval-ms`.
+- Errores de CRC observados.
+- Frecuencia y jitter medidos.
+- Fotos o diagramas del montaje.
+- Problemas de pin mux o pines ocupados.
+- Confirmación de A -> B, B -> A y HTML en ambos sentidos.
+
+La meta de la fase 6 es que el mismo software probado con `phy_sim` funcione
+sobre la luz real sin tocar la lógica del protocolo.

@@ -1,0 +1,18 @@
+{
+  "node": "B",
+  "role": "remote",
+  "reachable_from_pc": false,
+  "tx": {
+    "clock": { "gpio": 45, "pin": "P8_11", "direction": "out" },
+    "data": { "gpio": 60, "pin": "P9_12", "medium": "luz" }
+  },
+  "rx": {
+    "clock": { "gpio": 44, "pin": "P8_12", "direction": "in" },
+    "data": { "ain": 0, "pin": "P9_39", "medium": "luz" }
+  },
+  "clock_hz": 20.0,
+  "pulses_per_bit": 2,
+  "encoding": "latin-1",
+  "crc": "smbus",
+  "terminal": true
+}
