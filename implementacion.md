@@ -69,8 +69,9 @@ Isaac; el detalle está en la sección [Isaac](#isaac).
 - Prueba integral de la fase 5 con acentos Latin-1, usuarios distintos, CRC
   corrupto, trama incompleta y medición de tiempo.
 
-Alcance actual: enlace por luz. Sonido y vibración quedan fuera de esta
-primera versión y no forman parte de la fase 6.
+Alcance actual: enlace por luz y receptor piezoeléctrico acústico opcional sobre
+AIN1/P9_40. La transmisión acústica es opcional; vibración y recepción simultánea
+por varios medios quedan fuera de esta versión.
 
 ### Mapa de archivos principal
 
@@ -84,6 +85,10 @@ primera versión y no forman parte de la fase 6.
 | `c/src/phy_analog.c` | Lectura del ADC |
 | `c/src/phy_gpio_tx_channel.c` | TX de luz con dos pulsos por bit |
 | `c/src/phy_light_rx_channel.c` | RX de luz con reloj externo y ADC |
+| `c/src/phy_piezo_dsp.c` | Línea base, envolvente y detección acústica |
+| `c/src/phy_piezo_rx_channel.c` | RX piezo con reloj externo y AIN1 |
+| `c/src/phy_piezo_tx_channel.c` | TX piezo opcional con portadora |
+| `c/tests/test_piezo.c` | Pruebas del DSP piezo sin hardware |
 | `c/src/phy_node.c` | Hilos RX/TX, cola, eventos y API TCP |
 | `c/tools/phy_node.c` | Binario del nodo para la BeagleBone |
 | `c/src/phy_fake_link.c` | Enlace falso bidireccional |
@@ -237,9 +242,11 @@ Notas:
 
 Estado implementado en las fases 0 a 5: enlace por luz con 1 reloj y 1 dato
 por sentido, `clock_hz=20`, identidad por `HELLO`, relay en A y gateway HTML.
-El enlace de luz todavía no tiene ACK/NACK; TCP cubre PC ↔ A y la fase 7
-agregará confiabilidad al enlace A ↔ B. Sonido, vibración y los tres carriles
-quedan fuera de la primera versión.
+El enlace de luz tiene ACK/NACK y handshake desde las fases 7 y 8. Se agregó
+un segundo medio de recepción acústica con piezo sobre AIN1/P9_40, seleccionable
+con `--rx-medium piezo`, que reutiliza `phy_rx_channel_t` y no modifica el enlace
+óptico. La transmisión acústica opcional usa gpio50/P9_14. Vibración y los tres
+carriles simultáneos quedan fuera de esta versión.
 
 ---
 
@@ -1104,6 +1111,7 @@ sección [Isaac](#isaac).
 | 2026-11-16 | Fase 5: simulador `phy_sim` con enlace falso y temporización, `make prueba-integral`, pruebas HTML -> A -> B, B -> A -> HTML, Latin-1, usuarios distintos, CRC corrupto, trama incompleta y medición de tiempo con dos pulsos por bit. | Fase 6 física con Isaac |
 | 2026-11-16 | Fase 7 software: resincronización RX por ventana móvil de 44 bits, ACK/NACK stop-and-wait en `phy_node`, deduplicación por SEQ, timeout/reintentos configurables y `--no-ack`. `make prueba-integral` sigue pasando; `test_node` cubre NACK y timeout. | Validar ACK/NACK sobre el enlace físico y corregir el receptor LDR/AIN0 |
 | 2026-11-16 | Fase 8 software: handshake SYN / SYN-ACK / ACK al arrancar, control `SYN`/`SYN-ACK`, estados `disconnected`/`syn_sent`/`syn_received`/`connected`, reintento cada 1 s y `--no-handshake`. `test_node` y `test_fase5.py` pasan con handshake activo. | Validar handshake y ACK sobre el enlace físico y corregir el receptor LDR/AIN0 |
+| 2026-11-16 | Fase 9 software: receptor piezoeléctrico sobre AIN1/P9_40 con `phy_piezo_rx_channel`, DSP de línea base/envolvente en `phy_piezo_dsp`, TX acústico opcional en gpio50 y selección `--rx-medium`/`--tx-medium`. `make test` y `make test-piezo` pasan. | Calibrar umbrales con el hardware y validar el enlace acústico real |
 
 ---
 
@@ -1134,7 +1142,8 @@ cableado, umbrales y tiempos.
 - Reloj directo por GPIO y dato por LED/ADC.
 - Dos pulsos de reloj por bit.
 - Chat PC ↔ A ↔ B usando `phy_node`, el gateway local y el HTML.
-- Fuera de alcance: sonido, vibración, ACK/NACK y retransmisión.
+- Fuera de alcance de la fase 6: sonido, vibración, ACK/NACK y retransmisión.
+  El receptor piezoeléctrico se agregó después como fase 9; ver `docs/piezo.md`.
 
 ### Pines asignados
 
@@ -1148,6 +1157,8 @@ cableado, umbrales y tiempos.
 | Beagle B | Clock RX | gpio44 / P8_12 | Entrada |
 | Beagle B | Dato TX (LED) | gpio60 / P9_12 | Salida |
 | Beagle B | Dato RX | AIN0 / P9_39 | Entrada ADC |
+| Ambas | Dato RX piezo | AIN1 / P9_40 | Entrada ADC (opcional) |
+| Ambas | Dato TX piezo | gpio50 / P9_14 | Salida (opcional) |
 
 Cableado:
 
@@ -1166,7 +1177,10 @@ Alimentación y ADC:
 - VDD_ADC: P9_32, 1.8 V.
 - GND_ADC: P9_34.
 - AIN0: P9_39.
+- AIN1: P9_40, receptor piezoeléctrico; no reemplaza AIN0.
+- gpio50/P9_14: dato TX piezo opcional; verificar pin mux.
 - No aplicar 3.3 V ni 5 V al ADC.
+- La etapa piezo debe limitar la señal a 0..1.8 V; ver `docs/piezo.md`.
 - Unir las tierras de ambas placas; sin GND común el enlace no es confiable.
 - Verificar la polaridad del LED y del fototransistor/fotodiodo.
 - El LED debe iluminar el sensor del equipo contrario.

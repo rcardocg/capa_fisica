@@ -99,7 +99,7 @@ static void print_usage(const char *program)
             "Uso: %s [opciones]\n"
             "\n"
             "Nodo C de la capa fisica con API TCP, hilo de recepcion y cola de\n"
-            "transmision. Usa el enlace de luz por GPIO/ADC.\n"
+            "transmision. Usa el enlace optico o el receptor piezoelectrico.\n"
             "\n"
             "Opciones:\n"
             "  --role A|B               perfil de pines (defecto A)\n"
@@ -401,6 +401,9 @@ static int parse_options(int argc, char **argv, options_t *options)
         return 0;
     }
     if (options->piezo_on_level <= options->piezo_off_level) {
+        return 0;
+    }
+    if (options->piezo_off_level < 0 || options->piezo_on_level > 4095) {
         return 0;
     }
     if (options->piezo_gpio < 0 || options->piezo_carrier_hz < 1 ||

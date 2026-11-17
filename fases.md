@@ -8,7 +8,7 @@
 | Fecha | 2026-11-15 |
 | Objetivo | Dejar programada toda la lógica de comunicación para que mañana solo se conecten los cables |
 | Alcance | Dos BeagleBone, enlace de luz bidireccional, chat en terminal y mensajes hacia el HTML |
-| Fuera de alcance | RFC formal, ACK/NACK en la primera versión, canales de sonido y vibración |
+| Fuera de alcance | RFC formal, ACK/NACK en la primera versión, canales de sonido y vibración (el receptor piezo se agregó en la fase 9) |
 | Documentos relacionados | `implementacion.md`, `docs/servidores.md` |
 
 Este documento **no es un RFC**. Es un plan de fases y una guía de conexión.
@@ -27,6 +27,7 @@ La especificación completa del protocolo se hará después.
 | Fase 6 — Conexión física y prueba real | Pendiente |
 | Fase 7 — ACK/NACK y retransmisión | Completada en software |
 | Fase 8 — Handshake de conexión | Completada en software |
+| Fase 9 — Receptor piezoeléctrico | Completada en software |
 
 ## 1. Decisiones cerradas
 
@@ -579,6 +580,31 @@ Criterio de aceptación:
 - Si B no está lista, A reintenta cada segundo.
 - Los mensajes siguen llegando en ambos sentidos después del handshake.
 
+### Fase 9 — Receptor piezoeléctrico (completada en software)
+
+Objetivo: agregar un segundo medio de recepción acústica sin tocar el enlace
+óptico.
+
+Tareas:
+
+- Implementar `phy_piezo_rx_channel` sobre AIN1/P9_40 con la misma interfaz
+  `phy_rx_channel_t`.
+- Separar adquisición, DSP de línea base/envolvente, histéresis y
+  decodificación.
+- Agregar `--rx-medium piezo` y `--piezo-ain`; el defecto sigue siendo luz.
+- Agregar `phy_piezo_tx_channel` opcional sobre gpio50/P9_14.
+- Probar el DSP con `make test-piezo` y mantener `make test` sin regresiones.
+
+Criterio de aceptación:
+
+- El enlace óptico funciona igual sin cambiar opciones.
+- `--rx-medium piezo` usa AIN1 y no AIN0.
+- El protocolo, ACK/NACK, handshake y API no se modifican.
+- La señal analógica queda limitada a 0..1.8 V antes del ADC.
+
+La etapa eléctrica, pines, justificación de AIN1 y análisis de ruido están en
+`docs/piezo.md`.
+
 ## 8. Qué se programa hoy y qué se conecta mañana
 
 ### Hoy
@@ -616,3 +642,5 @@ Criterio de aceptación:
 6. Fase 5: prueba integral sin hardware.
 7. Fase 6: conectar y probar.
 8. Fase 7: ACK/NACK y retransmisión.
+9. Fase 8: handshake de conexión.
+10. Fase 9: receptor piezoeléctrico sobre AIN1.

@@ -224,7 +224,38 @@ La logica reutilizable esta separada del canal:
 - `phy_tcp_channel.c`: implementacion actual que habla con la Beagle.
 
 Para agregar sonido o vibracion se implementa otro canal con la misma
-interfaz, sin duplicar la construccion de tramas.
+interfaz, sin duplicar la construccion de tramas. El canal acustico ya esta
+disponible; ver `docs/piezo.md`.
+
+### 8.1 Receptor piezoeléctrico
+
+El nodo puede arrancar con un segundo medio de recepción sin modificar el
+enlace óptico. El canal acústico usa AIN1/P9_40 y la misma interfaz
+`phy_rx_channel_t`; las tramas, ACK/NACK, handshake y la API no cambian.
+
+```bash
+# Recepcion acustica, transmision optica
+sudo ./c/phy_node --role A --port 7000 --rx-medium piezo --piezo-ain 1 --trace
+
+# Enlace acustico completo (opcional, dato TX en P9_14 / gpio50)
+sudo ./c/phy_node --role A --port 7000 --rx-medium piezo --tx-medium piezo --trace
+```
+
+Opciones:
+
+| Opcion | Defecto | Funcion |
+|---|---:|---|
+| `--rx-medium light\|piezo` | `light` | Medio de recepcion |
+| `--tx-medium light\|piezo` | `light` | Medio de transmision |
+| `--piezo-ain N` | `1` | ADC del piezo, distinto de AIN0 |
+| `--piezo-gpio GPIO` | `50` | Dato TX del piezo |
+| `--piezo-carrier-hz N` | `1000` | Portadora del emisor |
+| `--piezo-on-level N` | `120` | Umbral de envolvente ON |
+| `--piezo-off-level N` | `60` | Umbral de envolvente OFF |
+
+Sin `--rx-medium piezo` el comportamiento es exactamente el del enlace óptico
+anterior. La etapa analógica, pines, calibración y problemas de ruido están en
+`docs/piezo.md`.
 
 ### 9. Tramas desde la pagina
 
