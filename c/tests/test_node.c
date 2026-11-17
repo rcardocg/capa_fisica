@@ -222,12 +222,15 @@ int main(void)
     config.ack_enabled = 1;
     config.ack_timeout_ms = 200;
     config.ack_retries = 3;
+    config.handshake_enabled = 1;
+    config.handshake_initiator = 1;
     CHECK(phy_node_start(&node_a, &config));
     a_ready = node_a != NULL;
 
     config.name = "B";
     config.tx = phy_fake_link_b_tx(&link);
     config.rx = phy_fake_link_b_rx(&link);
+    config.handshake_initiator = 0;
     CHECK(phy_node_start(&node_b, &config));
     b_ready = node_b != NULL;
 
@@ -248,6 +251,13 @@ int main(void)
         CHECK(wait_message(&client_a, &since_a, " bob desde B", 2000));
 
         CHECK(expect_command(&client_a, "STATUS", "STATUS node=A"));
+        {
+            char status[512];
+
+            CHECK(client_command(&client_a, "STATUS", status,
+                                 sizeof(status), 2000) == 1);
+            CHECK(strstr(status, "state=connected") != NULL);
+        }
 
         CHECK(expect_command(&client_a, "SEND ana largo desde A", "OK SEND"));
         CHECK(expect_command(&client_b, "SEND bob largo desde B", "OK SEND"));

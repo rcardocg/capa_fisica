@@ -26,6 +26,7 @@ La especificación completa del protocolo se hará después.
 | Fase 5 — Prueba integral de software | Completada |
 | Fase 6 — Conexión física y prueba real | Pendiente |
 | Fase 7 — ACK/NACK y retransmisión | Completada en software |
+| Fase 8 — Handshake de conexión | Completada en software |
 
 ## 1. Decisiones cerradas
 
@@ -561,6 +562,24 @@ Criterio de aceptación:
 - Un frame corrupto provoca `NACK`.
 - El emisor retransmite y el receptor entrega una sola vez.
 - El usuario no necesita cambios en la interfaz.
+
+### Fase 8 — Handshake de conexión (completada en software)
+
+Objetivo: establecer la conexión antes de transmitir mensajes.
+
+Tareas:
+
+- Agregar controles `SYN` y `SYN-ACK`.
+- Al arrancar, A inicia `SYN` y B responde `SYN-ACK`.
+- A confirma con `ACK` y ambos pasan a `CONNECTED`.
+- Reutilizar timeout, reintentos y la espera de control.
+- `--no-handshake` para diagnóstico y compatibilidad.
+
+Criterio de aceptación:
+
+- A y B quedan en `state=connected` antes de transmitir.
+- Si B no está lista, A reintenta cada segundo.
+- Los mensajes siguen llegando en ambos sentidos después del handshake.
 
 ## 8. Qué se programa hoy y qué se conecta mañana
 

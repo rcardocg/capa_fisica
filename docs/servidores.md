@@ -4,10 +4,10 @@
 
 | Campo | Valor |
 |---|---|
-| Version | 0.8 (ACK/NACK y resincronizacion) |
+| Version | 0.9 (handshake de conexion) |
 | Fecha | 2026-11-16 |
 | Alcance | Enviar mensajes con usuario y mostrar los recibidos en el HTML |
-| Incluye | `/api/message`, `/api/inbox`, `/api/bits`, polling, nodo A en 7000, ACK/NACK |
+| Incluye | `/api/message`, `/api/inbox`, `/api/bits`, polling, nodo A en 7000, ACK/NACK, handshake SYN |
 | No incluye | Otros canales, historial persistente, ventana deslizante |
 | Proxima ampliacion | Fase 6, conexion fisica y prueba real; fase 7 ya en software |
 
@@ -304,6 +304,16 @@ La Beagle no ejecuta nada de esto: solo recibe `BITS` y mueve el LED.
   nodos para pruebas de diagnostico.
 - Ambos nodos deben usar la misma configuracion de ACK. Un nodo con ACK activo
   espera confirmacion y se bloquea si el otro usa `--no-ack`.
+
+## Handshake de conexion
+
+- Al arrancar, A inicia el handshake `SYN` -> `SYN-ACK` -> `ACK`.
+- B permanece en `syn_received` hasta recibir el `ACK` o el primer frame de datos.
+- Antes de estar conectados, los `SEND` se encolan; se transmiten al conectar.
+- Si no hay conexion, A reintenta cada segundo.
+- `--no-handshake` desactiva el handshake; ambos nodos deben coincidir.
+- `STATUS` reporta `state=disconnected|syn_sent|syn_received|connected` y los
+  contadores `hs_retries` y `hs_timeouts`.
 
 Opciones:
 

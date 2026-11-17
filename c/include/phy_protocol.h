@@ -22,6 +22,8 @@
 #define PHY_CONTROL_HELLO 0x3u
 #define PHY_CONTROL_CONFIG 0x4u
 #define PHY_CONTROL_STATUS 0x5u
+#define PHY_CONTROL_SYN 0x6u
+#define PHY_CONTROL_SYN_ACK 0x7u
 #define PHY_CONTROL_ABORT 0xFu
 
 typedef enum {

@@ -165,6 +165,8 @@ int main(int argc, char **argv)
     config.ack_enabled = 1;
     config.ack_timeout_ms = 1000;
     config.ack_retries = 3;
+    config.handshake_enabled = 1;
+    config.handshake_initiator = 1;
     if (!phy_node_start(&node_a, &config)) {
         fprintf(stderr, "No se pudo iniciar el nodo A en 127.0.0.1:%d\n", options.a_port);
         phy_fake_link_close(&link);
@@ -176,6 +178,7 @@ int main(int argc, char **argv)
     config.tx = phy_fake_link_b_tx(&link);
     config.rx = phy_fake_link_b_rx(&link);
     config.port = options.b_port;
+    config.handshake_initiator = 0;
     if (!phy_node_start(&node_b, &config)) {
         fprintf(stderr, "No se pudo iniciar el nodo B en 127.0.0.1:%d\n", options.b_port);
         phy_node_stop(node_a);

@@ -1103,6 +1103,7 @@ sección [Isaac](#isaac).
 | 2026-11-15 | Fase 4: gateway local contra la API del nodo, `POST /api/message`, `GET /api/inbox`, usuario en el HTML, polling y modos `Tramas PHY` / `Bits sin trama`. El puerto de trabajo quedó en `7000`. | Prueba integral sin hardware |
 | 2026-11-16 | Fase 5: simulador `phy_sim` con enlace falso y temporización, `make prueba-integral`, pruebas HTML -> A -> B, B -> A -> HTML, Latin-1, usuarios distintos, CRC corrupto, trama incompleta y medición de tiempo con dos pulsos por bit. | Fase 6 física con Isaac |
 | 2026-11-16 | Fase 7 software: resincronización RX por ventana móvil de 44 bits, ACK/NACK stop-and-wait en `phy_node`, deduplicación por SEQ, timeout/reintentos configurables y `--no-ack`. `make prueba-integral` sigue pasando; `test_node` cubre NACK y timeout. | Validar ACK/NACK sobre el enlace físico y corregir el receptor LDR/AIN0 |
+| 2026-11-16 | Fase 8 software: handshake SYN / SYN-ACK / ACK al arrancar, control `SYN`/`SYN-ACK`, estados `disconnected`/`syn_sent`/`syn_received`/`connected`, reintento cada 1 s y `--no-handshake`. `test_node` y `test_fase5.py` pasan con handshake activo. | Validar handshake y ACK sobre el enlace físico y corregir el receptor LDR/AIN0 |
 
 ---
 

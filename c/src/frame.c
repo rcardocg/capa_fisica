@@ -38,6 +38,10 @@ const char *phy_control_name(uint8_t control)
         return "CONFIG";
     case PHY_CONTROL_STATUS:
         return "STATUS";
+    case PHY_CONTROL_SYN:
+        return "SYN";
+    case PHY_CONTROL_SYN_ACK:
+        return "SYN-ACK";
     case PHY_CONTROL_ABORT:
         return "ABORT";
     default:

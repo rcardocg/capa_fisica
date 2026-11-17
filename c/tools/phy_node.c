@@ -32,6 +32,7 @@ typedef struct {
     int ack_enabled;
     int ack_timeout_ms;
     int ack_retries;
+    int handshake_enabled;
     int show_help;
 } options_t;
 
@@ -87,6 +88,7 @@ static void print_usage(const char *program)
             "  --ack-timeout-ms N       espera de ACK/NACK (0 = automatico)\n"
             "  --ack-retries N          reintentos por frame (defecto 3)\n"
             "  --no-ack                 desactiva ACK/NACK\n"
+            "  --no-handshake           salta el handshake SYN/SYN-ACK/ACK\n"
             "  --trace                  muestra los eventos del nodo\n"
             "  --help                   muestra esta ayuda\n"
             "\n"
@@ -114,6 +116,7 @@ static int parse_options(int argc, char **argv, options_t *options)
         OPT_ACK_TIMEOUT,
         OPT_ACK_RETRIES,
         OPT_NO_ACK,
+        OPT_NO_HANDSHAKE,
         OPT_TRACE,
         OPT_HELP
     };
@@ -135,6 +138,7 @@ static int parse_options(int argc, char **argv, options_t *options)
         {"ack-timeout-ms", required_argument, NULL, OPT_ACK_TIMEOUT},
         {"ack-retries", required_argument, NULL, OPT_ACK_RETRIES},
         {"no-ack", no_argument, NULL, OPT_NO_ACK},
+        {"no-handshake", no_argument, NULL, OPT_NO_HANDSHAKE},
         {"trace", no_argument, NULL, OPT_TRACE},
         {"help", no_argument, NULL, OPT_HELP},
         {NULL, 0, NULL, 0}
@@ -159,6 +163,7 @@ static int parse_options(int argc, char **argv, options_t *options)
     options->ack_enabled = 1;
     options->ack_timeout_ms = 0;
     options->ack_retries = 3;
+    options->handshake_enabled = 1;
     options->show_help = 0;
 
     opterr = 0;
@@ -249,6 +254,9 @@ static int parse_options(int argc, char **argv, options_t *options)
             break;
         case OPT_NO_ACK:
             options->ack_enabled = 0;
+            break;
+        case OPT_NO_HANDSHAKE:
+            options->handshake_enabled = 0;
             break;
         case OPT_TRACE:
             options->trace = 1;
@@ -359,6 +367,8 @@ int main(int argc, char **argv)
     node_config.ack_enabled = options.ack_enabled;
     node_config.ack_timeout_ms = options.ack_timeout_ms;
     node_config.ack_retries = options.ack_retries;
+    node_config.handshake_enabled = options.handshake_enabled;
+    node_config.handshake_initiator = options.role == 'A';
 
     if (!phy_node_start(&node, &node_config)) {
         fprintf(stderr, "No se pudo iniciar el nodo en %s:%d: %s\n",
@@ -383,6 +393,11 @@ int main(int argc, char **argv)
     printf("  ACK=%s timeout=%d ms retries=%d\n",
            options.ack_enabled ? "on" : "off", options.ack_timeout_ms,
            options.ack_retries);
+    printf("  handshake=%s rol=%s\n",
+           options.handshake_enabled
+               ? (options.role == 'A' ? "on (iniciador)" : "on (respondedor)")
+               : "off",
+           options.role == 'A' ? "A" : "B");
     fflush(stdout);
 
     signal(SIGINT, on_signal);

@@ -320,6 +320,16 @@ La fase 7 agrega ACK/NACK stop-and-wait sobre el enlace de luz:
 - Opciones: `--ack-timeout-ms N`, `--ack-retries N`, `--no-ack`.
 - Ambos nodos deben usar la misma configuracion de ACK.
 
+La fase 8 agrega el handshake de conexion SYN / SYN-ACK / ACK:
+
+- A inicia el handshake y B responde.
+- Antes de estar conectados, los mensajes se encolan y se envian al conectar.
+- Si la otra Beagle no esta lista, A reintenta cada segundo.
+- `--no-handshake` desactiva el handshake para diagnostico o compatibilidad.
+- `STATUS` muestra `state=disconnected|syn_sent|syn_received|connected`.
+
+```
+
 La fase 3 agrega la identidad y el relay:
 
 - `HELLO` guarda el usuario de la conexion TCP.

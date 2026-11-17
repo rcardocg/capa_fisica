@@ -20,6 +20,8 @@ typedef struct {
     int ack_enabled;
     int ack_timeout_ms;
     int ack_retries;
+    int handshake_enabled;
+    int handshake_initiator;
 } phy_node_config_t;
 
 int phy_node_start(phy_node_t **out, const phy_node_config_t *config);
