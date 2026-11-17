@@ -6,6 +6,7 @@ SIM_BIN = phy_sim
 TEST_BIN = test_protocol
 TEST_RX_BIN = test_rx
 TEST_NODE_BIN = test_node
+TEST_PIEZO_BIN = test_piezo
 LIGHT_BIN = light_probe
 FLIPFLOP_BIN = flipflopT
 RX_TEST_BIN = light_rx_test
@@ -16,7 +17,7 @@ CHAT_SOURCES = $(CORE_SOURCES) src/net.c src/chat.c
 CHANNEL_SOURCES = src/phy_gpio.c src/phy_analog.c src/phy_sample.c
 TX_SOURCES = $(CORE_SOURCES) src/net.c src/phy_channel.c src/phy_tcp_channel.c src/phy_tx.c tools/phy_light_tx.c
 NODE_CORE_SOURCES = $(CORE_SOURCES) src/net.c src/phy_channel.c src/phy_rx_channel.c src/phy_rx.c src/phy_sample.c src/phy_node.c
-NODE_TOOL_SOURCES = $(NODE_CORE_SOURCES) src/phy_gpio.c src/phy_analog.c src/phy_gpio_tx_channel.c src/phy_light_rx_channel.c tools/phy_node.c
+NODE_TOOL_SOURCES = $(NODE_CORE_SOURCES) src/phy_gpio.c src/phy_analog.c src/phy_gpio_tx_channel.c src/phy_light_rx_channel.c src/phy_piezo_dsp.c src/phy_piezo_rx_channel.c src/phy_piezo_tx_channel.c tools/phy_node.c
 NODE_TEST_SOURCES = $(NODE_CORE_SOURCES) src/phy_fake_link.c tests/test_node.c
 SIM_SOURCES = $(NODE_CORE_SOURCES) src/phy_fake_link.c tools/phy_sim.c
 
@@ -40,14 +41,14 @@ CORRUPT_BIT ?= 43
 QUIET ?=
 QUIET_FLAG = $(if $(QUIET),--quiet,)
 
-.PHONY: all emisor receptor test test-rx test-node sim node probe-luz flipflop rx-luz tx-luz clean ayuda
+.PHONY: all emisor receptor test test-rx test-node test-piezo sim node probe-luz flipflop rx-luz tx-luz clean ayuda
 
 all: $(BIN) $(NODE_BIN)
 
 $(BIN): $(CHAT_SOURCES) include/phy_protocol.h include/phy_net.h
 	$(CC) $(CFLAGS) -o $@ $(CHAT_SOURCES)
 
-$(NODE_BIN): $(NODE_TOOL_SOURCES) include/phy_node.h include/phy_gpio_tx_channel.h include/phy_light_rx_channel.h include/phy_rx.h include/phy_rx_channel.h include/phy_gpio.h include/phy_analog.h include/phy_protocol.h
+$(NODE_BIN): $(NODE_TOOL_SOURCES) include/phy_node.h include/phy_gpio_tx_channel.h include/phy_light_rx_channel.h include/phy_piezo_rx_channel.h include/phy_piezo_tx_channel.h include/phy_piezo_dsp.h include/phy_rx.h include/phy_rx_channel.h include/phy_gpio.h include/phy_analog.h include/phy_protocol.h
 	$(CC) $(CFLAGS) -pthread -o $@ $(NODE_TOOL_SOURCES)
 
 $(TEST_NODE_BIN): $(NODE_TEST_SOURCES) include/phy_fake_link.h include/phy_node.h include/phy_net.h include/phy_protocol.h
@@ -65,6 +66,9 @@ RX_SOURCES = $(CORE_SOURCES) src/phy_rx_channel.c src/phy_fake_rx_channel.c src/
 
 $(TEST_RX_BIN): tests/test_rx.c $(RX_SOURCES) include/phy_rx.h include/phy_rx_channel.h include/phy_fake_rx_channel.h include/phy_sample.h include/phy_protocol.h
 	$(CC) $(CFLAGS) -o $@ tests/test_rx.c $(RX_SOURCES)
+
+$(TEST_PIEZO_BIN): tests/test_piezo.c src/phy_piezo_dsp.c src/phy_sample.c include/phy_piezo_dsp.h include/phy_sample.h
+	$(CC) $(CFLAGS) -o $@ tests/test_piezo.c src/phy_piezo_dsp.c src/phy_sample.c
 
 $(LIGHT_BIN): tools/light_probe.c
 	$(CC) $(CFLAGS) -o $@ tools/light_probe.c
@@ -106,10 +110,11 @@ receptor: $(BIN)
 		--crc $(CRC) --lanes $(LANES) --timeout $(TIMEOUT) --retries $(RETRIES) \
 		--seq-start $(SEQ_START) $(QUIET_FLAG)
 
-test: $(TEST_BIN) $(TEST_RX_BIN) $(TEST_NODE_BIN)
+test: $(TEST_BIN) $(TEST_RX_BIN) $(TEST_NODE_BIN) $(TEST_PIEZO_BIN)
 	@./$(TEST_BIN)
 	@./$(TEST_RX_BIN)
 	@./$(TEST_NODE_BIN)
+	@./$(TEST_PIEZO_BIN)
 
 test-rx: $(TEST_RX_BIN)
 	@./$(TEST_RX_BIN)
@@ -117,12 +122,15 @@ test-rx: $(TEST_RX_BIN)
 test-node: $(TEST_NODE_BIN)
 	@./$(TEST_NODE_BIN)
 
+test-piezo: $(TEST_PIEZO_BIN)
+	@./$(TEST_PIEZO_BIN)
+
 test-integral: $(SIM_BIN)
 	@python3 ../scripts/test_fase5.py --sim ./$(SIM_BIN)
 
 clean:
 	rm -f $(BIN) $(NODE_BIN) $(SIM_BIN) $(TEST_BIN) $(TEST_RX_BIN) $(TEST_NODE_BIN) \
-		$(LIGHT_BIN) $(FLIPFLOP_BIN) $(RX_TEST_BIN) $(TX_BIN)
+		$(TEST_PIEZO_BIN) $(LIGHT_BIN) $(FLIPFLOP_BIN) $(RX_TEST_BIN) $(TX_BIN)
 
 ayuda:
 	@printf '%s\n' \
@@ -133,6 +141,7 @@ ayuda:
 		'  make test             pruebas de protocolo, recepcion y nodo' \
 		'  make test-rx          pruebas de phy_rx con canal falso' \
 		'  make test-node        prueba A/B con enlace falso y API TCP' \
+		'  make test-piezo       pruebas del DSP del receptor piezo' \
 		'  make sim              levanta A/B simulados con API TCP' \
 		'  make test-integral    prueba integral de la fase 5' \
 		'  make node             inicia phy_node (NODE_ROLE, NODE_PORT, ...)' \

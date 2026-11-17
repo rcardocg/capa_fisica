@@ -24,7 +24,7 @@ SUDO ?=
 
 C_MAKE := $(MAKE) --no-print-directory -C $(C_DIR)
 
-.PHONY: all c emisor receptor nodo prueba test test-nodo prueba-integral test-integral probe-luz rx-luz tx-luz clean ayuda
+.PHONY: all c emisor receptor nodo prueba test test-nodo test-piezo prueba-integral test-integral probe-luz rx-luz tx-luz clean ayuda
 
 all: c
 
@@ -53,6 +53,9 @@ nodo:
 
 test-nodo:
 	@$(C_MAKE) test-node
+
+test-piezo:
+	@$(C_MAKE) test-piezo
 
 prueba-integral:
 	@$(C_MAKE) test-integral
@@ -92,6 +95,7 @@ ayuda:
 	@printf '%s\n' '  make prueba                  Ejecuta los tests C'
 	@printf '%s\n' '  make nodo                    Inicia phy_node (NODE_ROLE=A|B)'
 	@printf '%s\n' '  make test-nodo               Prueba A/B con enlace falso'
+	@printf '%s\n' '  make test-piezo              Prueba el DSP del receptor piezo'
 	@printf '%s\n' '  make prueba-integral         Prueba integral de la fase 5'
 	@printf '%s\n' '  make probe-luz               Prueba el canal de luz (ADC P9_39)'
 	@printf '%s\n' '  make probe-luz SUDO=sudo     Igual, con permisos de GPIO/ADC'

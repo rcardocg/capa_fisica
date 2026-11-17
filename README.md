@@ -187,6 +187,43 @@ Salida por bit:
 
 Polaridad: `on` = valor alto del ADC (≈3238), `off` = valor bajo (≈598).
 
+## Receptor piezoeléctrico acústico (segundo medio)
+
+Se agregó un receptor acústico con disco piezoeléctrico sin reemplazar el enlace
+óptico. Usa **AIN1 / P9_40** y conserva AIN0/P9_39 para el sensor de luz. El
+canal implementa la misma interfaz `phy_rx_channel_t`, así que las tramas,
+ACK/NACK, handshake y la API TCP no cambian.
+
+```bash
+# Recepción acústica; el enlace óptico sigue disponible
+sudo ./c/phy_node --role A --port 7000 --rx-medium piezo --piezo-ain 1 --trace
+
+# Enlace acústico completo opcional (dato TX en P9_14 / gpio50)
+sudo ./c/phy_node --role A --port 7000 --rx-medium piezo --tx-medium piezo --trace
+```
+
+Opciones principales:
+
+| Opción | Defecto | Función |
+|---|---:|---|
+| `--rx-medium light\|piezo` | `light` | Medio de recepción |
+| `--tx-medium light\|piezo` | `light` | Medio de transmisión |
+| `--piezo-ain N` | `1` | Canal ADC del piezo, distinto de AIN0 |
+| `--piezo-gpio GPIO` | `50` | Dato TX del piezo (P9_14) |
+| `--piezo-carrier-hz N` | `1000` | Portadora del emisor acústico |
+| `--piezo-on-level N` | `120` | Umbral de envolvente para 1 |
+| `--piezo-off-level N` | `60` | Umbral de envolvente para 0 |
+
+La etapa analógica, la tabla completa de pines, la justificación de AIN1 y los
+detalles de ruido, umbrales y sincronización están en
+[`docs/piezo.md`](docs/piezo.md).
+
+Pruebas del DSP sin hardware:
+
+```bash
+make test-piezo
+```
+
 ## Servidores local y Beagle
 
 La conexion PC-Beagle esta separada en dos programas independientes:

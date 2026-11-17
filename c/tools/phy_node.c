@@ -3,6 +3,8 @@
 #include "phy_gpio_tx_channel.h"
 #include "phy_light_rx_channel.h"
 #include "phy_node.h"
+#include "phy_piezo_rx_channel.h"
+#include "phy_piezo_tx_channel.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -12,6 +14,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+enum {
+    MEDIUM_LIGHT = 0,
+    MEDIUM_PIEZO = 1
+};
 
 typedef struct {
     char role;
@@ -24,6 +31,14 @@ typedef struct {
     int off_level;
     int adc_samples;
     int adc_interval_ms;
+    int tx_medium;
+    int rx_medium;
+    int piezo_gpio;
+    int piezo_ain;
+    int piezo_carrier_hz;
+    int piezo_on_level;
+    int piezo_off_level;
+    int piezo_baseline_shift;
     const char *bind_host;
     int port;
     phy_encoding_t encoding;
@@ -62,6 +77,22 @@ static int parse_int(const char *text, int *out)
     return 1;
 }
 
+static int parse_medium(const char *text, int *out)
+{
+    if (text == NULL || out == NULL) {
+        return 0;
+    }
+    if (strcmp(text, "light") == 0 || strcmp(text, "luz") == 0) {
+        *out = MEDIUM_LIGHT;
+        return 1;
+    }
+    if (strcmp(text, "piezo") == 0 || strcmp(text, "sonido") == 0) {
+        *out = MEDIUM_PIEZO;
+        return 1;
+    }
+    return 0;
+}
+
 static void print_usage(const char *program)
 {
     fprintf(stderr,
@@ -81,6 +112,14 @@ static void print_usage(const char *program)
             "  --off-level N            umbral de luz apagada (defecto 1700)\n"
             "  --adc-samples N          muestras por pulso (defecto 5)\n"
             "  --adc-interval-ms N      espera entre muestras (defecto 2)\n"
+            "  --rx-medium light|piezo  medio de recepcion (defecto light)\n"
+            "  --tx-medium light|piezo  medio de transmision (defecto light)\n"
+            "  --piezo-ain N            ADC del piezo, distinto de AIN0 (defecto 1)\n"
+            "  --piezo-gpio GPIO        dato TX del piezo (defecto 50 / P9_14)\n"
+            "  --piezo-carrier-hz N     portadora del piezo (defecto 1000)\n"
+            "  --piezo-on-level N       umbral de envolvente ON (defecto 120)\n"
+            "  --piezo-off-level N      umbral de envolvente OFF (defecto 60)\n"
+            "  --piezo-baseline-shift N divisor de seguimiento de linea base (defecto 6)\n"
             "  --bind DIRECCION         interfaz de la API (defecto 0.0.0.0)\n"
             "  --port PUERTO            puerto TCP de la API (defecto 7000)\n"
             "  --encoding utf-8|latin-1 codificacion (defecto latin-1)\n"
@@ -109,6 +148,14 @@ static int parse_options(int argc, char **argv, options_t *options)
         OPT_OFF_LEVEL,
         OPT_ADC_SAMPLES,
         OPT_ADC_INTERVAL,
+        OPT_RX_MEDIUM,
+        OPT_TX_MEDIUM,
+        OPT_PIEZO_AIN,
+        OPT_PIEZO_GPIO,
+        OPT_PIEZO_CARRIER,
+        OPT_PIEZO_ON_LEVEL,
+        OPT_PIEZO_OFF_LEVEL,
+        OPT_PIEZO_BASELINE_SHIFT,
         OPT_BIND,
         OPT_PORT,
         OPT_ENCODING,
@@ -131,6 +178,14 @@ static int parse_options(int argc, char **argv, options_t *options)
         {"off-level", required_argument, NULL, OPT_OFF_LEVEL},
         {"adc-samples", required_argument, NULL, OPT_ADC_SAMPLES},
         {"adc-interval-ms", required_argument, NULL, OPT_ADC_INTERVAL},
+        {"rx-medium", required_argument, NULL, OPT_RX_MEDIUM},
+        {"tx-medium", required_argument, NULL, OPT_TX_MEDIUM},
+        {"piezo-ain", required_argument, NULL, OPT_PIEZO_AIN},
+        {"piezo-gpio", required_argument, NULL, OPT_PIEZO_GPIO},
+        {"piezo-carrier-hz", required_argument, NULL, OPT_PIEZO_CARRIER},
+        {"piezo-on-level", required_argument, NULL, OPT_PIEZO_ON_LEVEL},
+        {"piezo-off-level", required_argument, NULL, OPT_PIEZO_OFF_LEVEL},
+        {"piezo-baseline-shift", required_argument, NULL, OPT_PIEZO_BASELINE_SHIFT},
         {"bind", required_argument, NULL, OPT_BIND},
         {"port", required_argument, NULL, OPT_PORT},
         {"encoding", required_argument, NULL, OPT_ENCODING},
@@ -155,6 +210,14 @@ static int parse_options(int argc, char **argv, options_t *options)
     options->off_level = 1700;
     options->adc_samples = 5;
     options->adc_interval_ms = 2;
+    options->tx_medium = MEDIUM_LIGHT;
+    options->rx_medium = MEDIUM_LIGHT;
+    options->piezo_gpio = 50;
+    options->piezo_ain = 1;
+    options->piezo_carrier_hz = 1000;
+    options->piezo_on_level = 120;
+    options->piezo_off_level = 60;
+    options->piezo_baseline_shift = 6;
     options->bind_host = "0.0.0.0";
     options->port = 7000;
     options->encoding = PHY_ENCODING_LATIN1;
@@ -221,6 +284,46 @@ static int parse_options(int argc, char **argv, options_t *options)
             break;
         case OPT_ADC_INTERVAL:
             if (!parse_int(optarg, &options->adc_interval_ms)) {
+                return 0;
+            }
+            break;
+        case OPT_RX_MEDIUM:
+            if (!parse_medium(optarg, &options->rx_medium)) {
+                return 0;
+            }
+            break;
+        case OPT_TX_MEDIUM:
+            if (!parse_medium(optarg, &options->tx_medium)) {
+                return 0;
+            }
+            break;
+        case OPT_PIEZO_AIN:
+            if (!parse_int(optarg, &options->piezo_ain)) {
+                return 0;
+            }
+            break;
+        case OPT_PIEZO_GPIO:
+            if (!parse_int(optarg, &options->piezo_gpio)) {
+                return 0;
+            }
+            break;
+        case OPT_PIEZO_CARRIER:
+            if (!parse_int(optarg, &options->piezo_carrier_hz)) {
+                return 0;
+            }
+            break;
+        case OPT_PIEZO_ON_LEVEL:
+            if (!parse_int(optarg, &options->piezo_on_level)) {
+                return 0;
+            }
+            break;
+        case OPT_PIEZO_OFF_LEVEL:
+            if (!parse_int(optarg, &options->piezo_off_level)) {
+                return 0;
+            }
+            break;
+        case OPT_PIEZO_BASELINE_SHIFT:
+            if (!parse_int(optarg, &options->piezo_baseline_shift)) {
                 return 0;
             }
             break;
@@ -291,6 +394,28 @@ static int parse_options(int argc, char **argv, options_t *options)
     if (options->on_level <= options->off_level) {
         return 0;
     }
+    if (options->piezo_ain < 0 || options->piezo_ain > 6) {
+        return 0;
+    }
+    if (options->rx_medium == MEDIUM_PIEZO && options->piezo_ain == 0) {
+        return 0;
+    }
+    if (options->piezo_on_level <= options->piezo_off_level) {
+        return 0;
+    }
+    if (options->piezo_gpio < 0 || options->piezo_carrier_hz < 1 ||
+        options->piezo_carrier_hz > 20000) {
+        return 0;
+    }
+    if (options->piezo_baseline_shift < 1 || options->piezo_baseline_shift > 12) {
+        return 0;
+    }
+    if (options->tx_medium == MEDIUM_PIEZO &&
+        (options->piezo_gpio == options->tx_clock ||
+         options->piezo_gpio == options->rx_clock ||
+         options->piezo_gpio == options->data_gpio)) {
+        return 0;
+    }
     if (options->port < 0 || options->port > 65535) {
         return 0;
     }
@@ -312,9 +437,14 @@ static int parse_options(int argc, char **argv, options_t *options)
 int main(int argc, char **argv)
 {
     options_t options;
-    phy_gpio_tx_channel_t tx_channel;
-    phy_light_rx_channel_t rx_channel;
-    phy_light_rx_channel_config_t rx_config;
+    phy_gpio_tx_channel_t light_tx;
+    phy_piezo_tx_channel_t piezo_tx;
+    phy_light_rx_channel_t light_rx;
+    phy_piezo_rx_channel_t piezo_rx;
+    phy_light_rx_channel_config_t light_config;
+    phy_piezo_rx_channel_config_t piezo_config;
+    phy_channel_t *tx_base = NULL;
+    phy_rx_channel_t *rx_base = NULL;
     phy_node_config_t node_config;
     phy_node_t *node = NULL;
     int tx_ready = 0;
@@ -329,35 +459,69 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (!phy_gpio_tx_channel_open(&tx_channel, options.tx_clock,
-                                  options.data_gpio, options.clock_hz)) {
-        fprintf(stderr, "No se pudo abrir clock gpio%d y LED gpio%d: %s\n",
-                options.tx_clock, options.data_gpio, strerror(errno));
-        fprintf(stderr, "Probar con sudo o verificar /sys/class/gpio.\n");
-        return 1;
+    if (options.tx_medium == MEDIUM_PIEZO) {
+        if (!phy_piezo_tx_channel_open(&piezo_tx, options.tx_clock,
+                                       options.piezo_gpio, options.clock_hz,
+                                       options.piezo_carrier_hz)) {
+            fprintf(stderr,
+                    "No se pudo abrir el transmisor piezo (clock gpio%d, dato gpio%d): %s\n",
+                    options.tx_clock, options.piezo_gpio, strerror(errno));
+            return 1;
+        }
+        tx_base = phy_piezo_tx_channel_base(&piezo_tx);
+    } else {
+        if (!phy_gpio_tx_channel_open(&light_tx, options.tx_clock,
+                                      options.data_gpio, options.clock_hz)) {
+            fprintf(stderr, "No se pudo abrir clock gpio%d y LED gpio%d: %s\n",
+                    options.tx_clock, options.data_gpio, strerror(errno));
+            fprintf(stderr, "Probar con sudo o verificar /sys/class/gpio.\n");
+            return 1;
+        }
+        tx_base = phy_gpio_tx_channel_base(&light_tx);
     }
     tx_ready = 1;
 
-    rx_config.clock_gpio = options.rx_clock;
-    rx_config.ain = options.ain;
-    rx_config.clock_hz = options.clock_hz;
-    rx_config.on_level = options.on_level;
-    rx_config.off_level = options.off_level;
-    rx_config.adc_samples = options.adc_samples;
-    rx_config.adc_interval_ms = options.adc_interval_ms;
-    if (!phy_light_rx_channel_open(&rx_channel, &rx_config)) {
-        fprintf(stderr, "No se pudo abrir el receptor de luz (clock gpio%d, AIN%d): %s\n",
-                options.rx_clock, options.ain, strerror(errno));
-        fprintf(stderr, "Probar con sudo o revisar /sys/bus/iio/devices.\n");
-        phy_channel_close(phy_gpio_tx_channel_base(&tx_channel));
-        return 1;
+    if (options.rx_medium == MEDIUM_PIEZO) {
+        piezo_config.clock_gpio = options.rx_clock;
+        piezo_config.ain = options.piezo_ain;
+        piezo_config.clock_hz = options.clock_hz;
+        piezo_config.on_level = options.piezo_on_level;
+        piezo_config.off_level = options.piezo_off_level;
+        piezo_config.adc_samples = options.adc_samples;
+        piezo_config.adc_interval_ms = options.adc_interval_ms;
+        piezo_config.baseline_shift = options.piezo_baseline_shift;
+        if (!phy_piezo_rx_channel_open(&piezo_rx, &piezo_config)) {
+            fprintf(stderr,
+                    "No se pudo abrir el receptor piezo (clock gpio%d, AIN%d): %s\n",
+                    options.rx_clock, options.piezo_ain, strerror(errno));
+            fprintf(stderr, "Probar con sudo o revisar /sys/bus/iio/devices.\n");
+            phy_channel_close(tx_base);
+            return 1;
+        }
+        rx_base = phy_piezo_rx_channel_base(&piezo_rx);
+    } else {
+        light_config.clock_gpio = options.rx_clock;
+        light_config.ain = options.ain;
+        light_config.clock_hz = options.clock_hz;
+        light_config.on_level = options.on_level;
+        light_config.off_level = options.off_level;
+        light_config.adc_samples = options.adc_samples;
+        light_config.adc_interval_ms = options.adc_interval_ms;
+        if (!phy_light_rx_channel_open(&light_rx, &light_config)) {
+            fprintf(stderr, "No se pudo abrir el receptor de luz (clock gpio%d, AIN%d): %s\n",
+                    options.rx_clock, options.ain, strerror(errno));
+            fprintf(stderr, "Probar con sudo o revisar /sys/bus/iio/devices.\n");
+            phy_channel_close(tx_base);
+            return 1;
+        }
+        rx_base = phy_light_rx_channel_base(&light_rx);
     }
     rx_ready = 1;
 
     memset(&node_config, 0, sizeof(node_config));
     node_config.name = options.role == 'A' ? "A" : "B";
-    node_config.tx = phy_gpio_tx_channel_base(&tx_channel);
-    node_config.rx = phy_light_rx_channel_base(&rx_channel);
+    node_config.tx = tx_base;
+    node_config.rx = rx_base;
     node_config.crc = options.crc;
     node_config.encoding = options.encoding;
     node_config.bind_host = options.bind_host;
@@ -374,19 +538,31 @@ int main(int argc, char **argv)
         fprintf(stderr, "No se pudo iniciar el nodo en %s:%d: %s\n",
                 options.bind_host, options.port, strerror(errno));
         if (rx_ready) {
-            phy_rx_channel_close(phy_light_rx_channel_base(&rx_channel));
+            phy_rx_channel_close(rx_base);
         }
         if (tx_ready) {
-            phy_channel_close(phy_gpio_tx_channel_base(&tx_channel));
+            phy_channel_close(tx_base);
         }
         return 1;
     }
 
     printf("Nodo %s escuchando en %s:%d\n",
            node_config.name, options.bind_host, phy_node_port(node));
-    printf("  TX clock gpio%d, LED gpio%d\n", options.tx_clock, options.data_gpio);
-    printf("  RX clock gpio%d, AIN%d, umbrales ON>=%d OFF<=%d\n",
-           options.rx_clock, options.ain, options.on_level, options.off_level);
+    if (options.tx_medium == MEDIUM_PIEZO) {
+        printf("  TX clock gpio%d, piezo gpio%d, portadora %d Hz\n",
+               options.tx_clock, options.piezo_gpio, options.piezo_carrier_hz);
+    } else {
+        printf("  TX clock gpio%d, LED gpio%d\n",
+               options.tx_clock, options.data_gpio);
+    }
+    if (options.rx_medium == MEDIUM_PIEZO) {
+        printf("  RX clock gpio%d, AIN%d piezo, envolvente ON>=%d OFF<=%d\n",
+               options.rx_clock, options.piezo_ain, options.piezo_on_level,
+               options.piezo_off_level);
+    } else {
+        printf("  RX clock gpio%d, AIN%d, umbrales ON>=%d OFF<=%d\n",
+               options.rx_clock, options.ain, options.on_level, options.off_level);
+    }
     printf("  clock_hz=%d, encoding=%s, crc=%s\n",
            options.clock_hz, phy_encoding_name(options.encoding),
            phy_crc_name(options.crc));
@@ -413,10 +589,10 @@ int main(int argc, char **argv)
 
     phy_node_stop(node);
     if (rx_ready) {
-        phy_rx_channel_close(phy_light_rx_channel_base(&rx_channel));
+        phy_rx_channel_close(rx_base);
     }
     if (tx_ready) {
-        phy_channel_close(phy_gpio_tx_channel_base(&tx_channel));
+        phy_channel_close(tx_base);
     }
     printf("Nodo %s detenido\n", node_config.name);
     return 0;

@@ -235,16 +235,15 @@ funcionen. Los números de GPIO son de la BeagleBone Black.
 
 ### 5.1 Resumen de pines
 
-| Equipo | Señal | GPIO / pin físico | Dirección |
-|---|---|---|---|
-| Beagle A | TX clock | gpio44 / P8_12 | Salida |
-| Beagle A | RX clock | gpio45 / P8_11 | Entrada |
-| Beagle A | TX dato | gpio60 / P9_12 | Salida |
-| Beagle A | RX dato | AIN0 / P9_39 | Entrada analógica |
-| Beagle B | TX clock | gpio45 / P8_11 | Salida |
-| Beagle B | RX clock | gpio44 / P8_12 | Entrada |
-| Beagle B | TX dato | gpio60 / P9_12 | Salida |
-| Beagle B | RX dato | AIN0 / P9_39 | Entrada analógica |
+| Señal | Beagle A | Beagle B |
+|---|---|---|
+| Reloj TX (salida) | P8_12 · gpio44 | P8_11 · gpio45 |
+| Reloj RX (entrada) | P8_11 · gpio45 | P8_12 · gpio44 |
+| Dato TX (LED) | P9_12 · gpio60 | P9_12 · gpio60 |
+| Dato RX (luz) | P9_39 · AIN0 | P9_39 · AIN0 |
+
+Los relojes se cruzan: la salida de una placa entra en la otra. El dato de
+salida es un LED y el de entrada es un sensor de luz.
 
 ### 5.2 Cableado entre equipos
 
@@ -263,12 +262,11 @@ de recepción de A. Cada LED debe iluminar el sensor del equipo contrario.
 
 ### 5.3 Alimentación y ADC
 
-| Señal | Pin |
+| Uso | Pin |
 |---|---|
-| VDD_ADC | P9_32 (1.8 V) |
-| GND_ADC | P9_34 |
-| AIN0 | P9_39 |
-| GND común | P9_34 / GND de ambas placas |
+| Alimentación ADC | P9_32 (1.8 V) |
+| Masa analógica | P9_34 (GNDA) |
+| Masa común | GND de ambas placas |
 
 Reglas:
 

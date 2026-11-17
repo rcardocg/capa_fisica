@@ -3,16 +3,51 @@
   "role": "gateway",
   "reachable_from_pc": true,
   "tx": {
-    "clock": { "gpio": 44, "pin": "P8_12", "direction": "out" },
-    "data": { "gpio": 60, "pin": "P9_12", "medium": "luz" }
+    "clock": {
+      "gpio": 44,
+      "pin": "P8_12",
+      "direction": "out"
+    },
+    "data": {
+      "gpio": 60,
+      "pin": "P9_12",
+      "medium": "luz"
+    }
   },
   "rx": {
-    "clock": { "gpio": 45, "pin": "P8_11", "direction": "in" },
-    "data": { "ain": 0, "pin": "P9_39", "medium": "luz" }
+    "clock": {
+      "gpio": 45,
+      "pin": "P8_11",
+      "direction": "in"
+    },
+    "data": {
+      "ain": 0,
+      "pin": "P9_39",
+      "medium": "luz"
+    }
   },
   "clock_hz": 20.0,
   "pulses_per_bit": 2,
   "encoding": "latin-1",
   "crc": "smbus",
-  "api": { "host": "0.0.0.0", "port": 7000 }
+  "api": {
+    "host": "0.0.0.0",
+    "port": 7000
+  },
+  "piezo": {
+    "rx": {
+      "ain": 1,
+      "pin": "P9_40",
+      "medium": "sonido",
+      "on_level": 120,
+      "off_level": 60,
+      "baseline_shift": 6
+    },
+    "tx": {
+      "gpio": 50,
+      "pin": "P9_14",
+      "medium": "sonido",
+      "carrier_hz": 1000
+    }
+  }
 }
