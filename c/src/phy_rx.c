@@ -5,14 +5,36 @@
 #include <stdio.h>
 #include <string.h>
 
+static int receive_bit(phy_rx_channel_t *channel, uint8_t *bit, int timeout_ms)
+{
+    int sample_one = 0;
+    int sample_two = 0;
+    int result;
+
+    result = phy_rx_channel_recv_sample(channel, &sample_one, timeout_ms);
+    if (result != 1) {
+        return result < 0 ? -1 : 0;
+    }
+    result = phy_rx_channel_recv_sample(channel, &sample_two, timeout_ms);
+    if (result != 1) {
+        return result < 0 ? -1 : 0;
+    }
+    *bit = (uint8_t)(phy_sample_decode_pair(sample_one, sample_two) ? 1u : 0u);
+    return 1;
+}
+
 int phy_rx_frame(phy_rx_channel_t *channel, phy_crc_algorithm_t crc,
                  phy_frame_t *frame, phy_frame_status_t *status,
                  uint8_t *wire, size_t wire_capacity, int timeout_ms)
 {
-    size_t bit;
+    uint8_t window[PHY_FRAME_BITS];
+    size_t filled = 0;
 
     if (channel == NULL || frame == NULL || status == NULL || wire == NULL ||
         wire_capacity < PHY_FRAME_BITS) {
+        return -1;
+    }
+    if (crc < 0 || crc >= PHY_CRC_ALGORITHM_COUNT) {
         return -1;
     }
 
@@ -20,24 +42,45 @@ int phy_rx_frame(phy_rx_channel_t *channel, phy_crc_algorithm_t crc,
         return 0;
     }
 
-    for (bit = 0; bit < PHY_FRAME_BITS; bit++) {
-        int sample_one = 0;
-        int sample_two = 0;
-        int result;
+    for (;;) {
+        uint8_t bit = 0;
+        int result = receive_bit(channel, &bit, timeout_ms);
 
-        result = phy_rx_channel_recv_sample(channel, &sample_one, timeout_ms);
         if (result != 1) {
             return result < 0 ? -1 : 0;
         }
-        result = phy_rx_channel_recv_sample(channel, &sample_two, timeout_ms);
-        if (result != 1) {
-            return result < 0 ? -1 : 0;
+
+        if (filled < PHY_FRAME_BITS) {
+            window[filled++] = bit;
+        } else {
+            memmove(window, window + 1, PHY_FRAME_BITS - 1u);
+            window[PHY_FRAME_BITS - 1u] = bit;
         }
-        wire[bit] = (uint8_t)(phy_sample_decode_pair(sample_one, sample_two) ? 1u : 0u);
+
+        if (filled < PHY_FRAME_BITS) {
+            continue;
+        }
+
+        {
+            phy_frame_t candidate;
+            phy_frame_status_t candidate_status;
+
+            candidate_status = phy_frame_from_bits(window, PHY_FRAME_BITS, crc,
+                                                   0, &candidate);
+            if (candidate_status != PHY_FRAME_OK) {
+                continue;
+            }
+
+            memcpy(wire, window, PHY_FRAME_BITS);
+            *frame = candidate;
+            if (phy_frame_verify_crc(&candidate)) {
+                *status = PHY_FRAME_OK;
+            } else {
+                *status = PHY_FRAME_ERR_CRC;
+            }
+            return 1;
+        }
     }
-
-    *status = phy_frame_from_bits(wire, PHY_FRAME_BITS, crc, 1, frame);
-    return 1;
 }
 
 static void trace_frame(const phy_frame_t *frame, phy_frame_status_t status)

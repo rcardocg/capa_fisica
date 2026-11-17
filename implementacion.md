@@ -1102,14 +1102,16 @@ sección [Isaac](#isaac).
 | 2026-11-15 | Fase 3: usuario guardado en la conexión TCP, frames `HELLO` antes de cada mensaje, asociación del usuario en B y cola de mensajes recibidos en A para el inbox. `phy_node` reemplaza a `beagle_server.py` en el camino del chat. | Gateway HTTP y HTML |
 | 2026-11-15 | Fase 4: gateway local contra la API del nodo, `POST /api/message`, `GET /api/inbox`, usuario en el HTML, polling y modos `Tramas PHY` / `Bits sin trama`. El puerto de trabajo quedó en `7000`. | Prueba integral sin hardware |
 | 2026-11-16 | Fase 5: simulador `phy_sim` con enlace falso y temporización, `make prueba-integral`, pruebas HTML -> A -> B, B -> A -> HTML, Latin-1, usuarios distintos, CRC corrupto, trama incompleta y medición de tiempo con dos pulsos por bit. | Fase 6 física con Isaac |
+| 2026-11-16 | Fase 7 software: resincronización RX por ventana móvil de 44 bits, ACK/NACK stop-and-wait en `phy_node`, deduplicación por SEQ, timeout/reintentos configurables y `--no-ack`. `make prueba-integral` sigue pasando; `test_node` cubre NACK y timeout. | Validar ACK/NACK sobre el enlace físico y corregir el receptor LDR/AIN0 |
 
 ---
 
 ## 19. Próximo paso
 
-Las fases 0 a 5 están completas y verificadas sin hardware. El próximo trabajo
-es la fase 6: conectar las dos BeagleBone, calibrar el enlace de luz y validar
-el chat real.
+Las fases 0 a 5 y la fase 7 en software están completas y verificadas sin
+hardware. El próximo trabajo es la fase 6: corregir el receptor LDR/AIN0,
+conectar las dos BeagleBone, calibrar el enlace de luz y validar ACK/NACK y el
+chat real.
 
 El paso a paso, pines, cableado, comandos de calibración y criterios de
 aceptación están en la sección [Isaac](#isaac). La fase 7 (ACK/NACK y

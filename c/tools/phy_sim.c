@@ -162,6 +162,9 @@ int main(int argc, char **argv)
     config.port = options.a_port;
     config.rx_timeout_ms = 100;
     config.trace = options.trace;
+    config.ack_enabled = 1;
+    config.ack_timeout_ms = 1000;
+    config.ack_retries = 3;
     if (!phy_node_start(&node_a, &config)) {
         fprintf(stderr, "No se pudo iniciar el nodo A en 127.0.0.1:%d\n", options.a_port);
         phy_fake_link_close(&link);

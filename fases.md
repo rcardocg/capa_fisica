@@ -25,7 +25,7 @@ La especificación completa del protocolo se hará después.
 | Fase 4 — Gateway de la PC y HTML | Completada |
 | Fase 5 — Prueba integral de software | Completada |
 | Fase 6 — Conexión física y prueba real | Pendiente |
-| Fase 7 — ACK/NACK y retransmisión | Pendiente |
+| Fase 7 — ACK/NACK y retransmisión | Completada en software |
 
 ## 1. Decisiones cerradas
 
@@ -542,9 +542,12 @@ Criterio de aceptación:
 - El HTML muestra los mensajes de ambos.
 - No se requiere cambiar código, solo configuración y cables.
 
-### Fase 7 — ACK/NACK y retransmisión (después)
+### Fase 7 — ACK/NACK y retransmisión (completada en software)
 
 Objetivo: agregar confiabilidad al enlace de luz.
+
+Estado: implementado y probado con enlace falso. Pendiente la validación sobre
+hardware real junto con la fase 6.
 
 Tareas:
 

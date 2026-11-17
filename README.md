@@ -219,6 +219,7 @@ El servidor local habla con la API del nodo y expone:
 | `GET` | `/api/inbox?since=N` | Mensajes recibidos desde B por polling |
 | `POST` | `/api/message` | Envia `{"user":"ana","text":"hola"}` con `SEND` |
 | `POST` | `/api/bits` | Envia bits crudos con `BITS` |
+| `POST/GET` | `/api/frames` | Diagnostico del emisor C con polling en vivo |
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/message \
@@ -229,8 +230,10 @@ curl 'http://127.0.0.1:8080/api/inbox?since=0'
 
 En modo `Tramas PHY` la pagina envia el mensaje con usuario al nodo de A, que
 lo transmite por luz y lo entrega a B. En modo `Bits sin trama` conserva el
-envio de bits crudos con `/api/bits`. El inbox se consulta periodicamente para
-mostrar en el HTML los mensajes que llegan desde B con su usuario y origen.
+envio de bits crudos con `/api/bits`. El modo `Tramas al LED (diagnóstico)`
+ejecuta el emisor C con `/api/frames` y muestra en vivo las lineas `[TX]`. El
+inbox se consulta periodicamente para mostrar en el HTML los mensajes que
+llegan desde B con su usuario y origen.
 
 `beagle_server.py` queda como herramienta de diagnostico en otro puerto, por ejemplo `7002`
 para el emisor suelto `phy_light_tx`.
@@ -305,7 +308,17 @@ El binario `c/phy_node` usa el enlace de luz real por GPIO/ADC:
 
 La API TCP acepta `PING`, `HELLO <usuario>`, `BITS <bits>`,
 `SEND <usuario> <texto>`, `POLL <since>`, `STATUS` y `QUIT`. `POLL` devuelve
-eventos `MESSAGE`, `TX`, `RX` y `ERROR`, y termina con `NEXT <n>`.
+eventos `MESSAGE`, `TX`, `RX`, `ACK`, `NACK`, `TIMEOUT` y `ERROR`, y termina
+con `NEXT <n>`.
+
+La fase 7 agrega ACK/NACK stop-and-wait sobre el enlace de luz:
+
+- Cada frame `HELLO` y `DATA` espera un `ACK`.
+- Si llega `NACK` o vence el timeout, se retransmite el mismo `SEQ`.
+- El receptor descarta duplicados y reenvía `ACK`.
+- `BITS` crudo sigue sin ACK; usarlo con `--no-ack` si se mezcla con el chat.
+- Opciones: `--ack-timeout-ms N`, `--ack-retries N`, `--no-ack`.
+- Ambos nodos deben usar la misma configuracion de ACK.
 
 La fase 3 agrega la identidad y el relay:
 

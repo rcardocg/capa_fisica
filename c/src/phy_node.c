@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #define PHY_NODE_MAX_JOBS 128u
@@ -53,6 +54,8 @@ struct phy_node {
 
     pthread_mutex_t lock;
     pthread_cond_t tx_cond;
+    pthread_mutex_t tx_lock;
+    pthread_cond_t ack_cond;
 
     phy_node_job_t *job_head;
     phy_node_job_t *job_tail;
@@ -68,6 +71,21 @@ struct phy_node {
     unsigned int rx_frames;
     char last_rx_status[64];
     char rx_user[64];
+
+    int ack_enabled;
+    int ack_timeout_ms;
+    int ack_retries;
+    int ack_waiting;
+    uint8_t ack_wait_seq;
+    int ack_result;
+    unsigned int ack_sent;
+    unsigned int nack_sent;
+    unsigned int ack_timeouts;
+    unsigned int tx_retries;
+
+    uint8_t rx_expected_seq;
+    uint8_t rx_last_delivered;
+    int rx_has_last;
 };
 
 static int node_is_running(phy_node_t *node)
@@ -118,6 +136,146 @@ static void node_add_event(phy_node_t *node, const char *type, const char *forma
         fprintf(stderr, "[%s] %s\n", node->name, line);
         fflush(stderr);
     }
+}
+
+static int node_send_bits(phy_node_t *node, const uint8_t *bits, size_t length)
+{
+    int result;
+
+    pthread_mutex_lock(&node->tx_lock);
+    result = phy_channel_send_bits(node->tx, bits, length);
+    pthread_mutex_unlock(&node->tx_lock);
+    return result;
+}
+
+static int node_send_control(phy_node_t *node, uint8_t control, uint8_t seq)
+{
+    phy_frame_t frame;
+    uint8_t bits[PHY_FRAME_BITS];
+
+    if (!node->ack_enabled) {
+        return 0;
+    }
+    phy_frame_init(&frame, control, seq, 0, node->crc);
+    phy_frame_to_bits(&frame, bits);
+    if (!node_send_bits(node, bits, PHY_FRAME_BITS)) {
+        node_add_event(node, "ERROR", "TX %s seq=%u failed",
+                       phy_control_name(control), seq);
+        return 0;
+    }
+
+    pthread_mutex_lock(&node->lock);
+    if (control == PHY_CONTROL_ACK) {
+        node->ack_sent++;
+    } else {
+        node->nack_sent++;
+    }
+    pthread_mutex_unlock(&node->lock);
+    node_add_event(node, "TX", "%s seq=%u", phy_control_name(control), seq);
+    return 1;
+}
+
+static void node_handle_ack(phy_node_t *node, uint8_t control, uint8_t seq)
+{
+    int matched = 0;
+
+    pthread_mutex_lock(&node->lock);
+    if (node->ack_waiting && node->ack_wait_seq == seq) {
+        node->ack_result = control == PHY_CONTROL_ACK ? 1 : -1;
+        node->ack_waiting = 0;
+        matched = 1;
+        pthread_cond_broadcast(&node->ack_cond);
+    }
+    pthread_mutex_unlock(&node->lock);
+
+    if (matched) {
+        node_add_event(node, control == PHY_CONTROL_ACK ? "ACK" : "NACK",
+                       "rx seq=%u", seq);
+    }
+}
+
+static int node_wait_ack(phy_node_t *node, uint8_t seq)
+{
+    struct timespec deadline;
+    int result = 0;
+
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += node->ack_timeout_ms / 1000;
+    deadline.tv_nsec += (long)(node->ack_timeout_ms % 1000) * 1000000L;
+    if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_sec++;
+        deadline.tv_nsec -= 1000000000L;
+    }
+
+    pthread_mutex_lock(&node->lock);
+    while (node->running && node->ack_waiting) {
+        int wait_result = pthread_cond_timedwait(&node->ack_cond, &node->lock,
+                                                 &deadline);
+        if (wait_result != 0) {
+            break;
+        }
+    }
+    if (!node->ack_waiting) {
+        result = node->ack_result;
+    }
+    node->ack_waiting = 0;
+    if (result == 0 && node->running) {
+        node->ack_timeouts++;
+    }
+    pthread_mutex_unlock(&node->lock);
+
+    if (result == 0) {
+        node_add_event(node, "TIMEOUT", "seq=%u", seq);
+    }
+    return result;
+}
+
+static int node_send_frame_acked(phy_node_t *node, const phy_frame_t *frame,
+                                 const uint8_t *bits)
+{
+    int attempt;
+
+    for (attempt = 0; attempt < node->ack_retries; attempt++) {
+        int ack_result;
+
+        pthread_mutex_lock(&node->lock);
+        node->ack_waiting = 1;
+        node->ack_wait_seq = frame->seq;
+        node->ack_result = 0;
+        pthread_mutex_unlock(&node->lock);
+
+        if (!node_send_bits(node, bits, PHY_FRAME_BITS)) {
+            pthread_mutex_lock(&node->lock);
+            node->ack_waiting = 0;
+            pthread_mutex_unlock(&node->lock);
+            node_add_event(node, "ERROR", "TX seq=%u failed", frame->seq);
+            return 0;
+        }
+        node_add_event(node, "TX",
+                       "control=%s seq=%u data=0x%02X crc=0x%02X attempt=%d",
+                       phy_control_name(frame->control), (unsigned int)frame->seq,
+                       (unsigned int)frame->data, (unsigned int)frame->crc,
+                       attempt + 1);
+
+        ack_result = node_wait_ack(node, frame->seq);
+        if (ack_result == 1) {
+            pthread_mutex_lock(&node->lock);
+            node->tx_seq = (uint8_t)((frame->seq + 1u) & 0x0Fu);
+            node->tx_frames++;
+            pthread_mutex_unlock(&node->lock);
+            return 1;
+        }
+        if (!node_is_running(node)) {
+            return 0;
+        }
+
+        pthread_mutex_lock(&node->lock);
+        node->tx_retries++;
+        pthread_mutex_unlock(&node->lock);
+    }
+
+    node_add_event(node, "ERROR", "sin ACK seq=%u", (unsigned int)frame->seq);
+    return 0;
 }
 
 static int node_enqueue(phy_node_t *node, int is_bits, const char *user,
@@ -271,6 +429,10 @@ static void handle_status(phy_node_t *node, int fd)
     size_t events;
     unsigned int tx_frames;
     unsigned int rx_frames;
+    unsigned int ack_sent;
+    unsigned int nack_sent;
+    unsigned int ack_timeouts;
+    unsigned int tx_retries;
     char last_rx[64];
     int running;
 
@@ -279,12 +441,17 @@ static void handle_status(phy_node_t *node, int fd)
     events = node->event_count;
     tx_frames = node->tx_frames;
     rx_frames = node->rx_frames;
+    ack_sent = node->ack_sent;
+    nack_sent = node->nack_sent;
+    ack_timeouts = node->ack_timeouts;
+    tx_retries = node->tx_retries;
     memcpy(last_rx, node->last_rx_status, sizeof(last_rx));
     running = node->running;
     pthread_mutex_unlock(&node->lock);
 
-    send_line(fd, "STATUS node=%s running=%d queued=%zu events=%zu tx_frames=%u rx_frames=%u last_rx=%s",
+    send_line(fd, "STATUS node=%s running=%d queued=%zu events=%zu tx_frames=%u rx_frames=%u ack=%u nack=%u timeouts=%u retries=%u last_rx=%s",
               node->name, running, queued, events, tx_frames, rx_frames,
+              ack_sent, nack_sent, ack_timeouts, tx_retries,
               last_rx[0] == '\0' ? "none" : last_rx);
 }
 
@@ -526,9 +693,50 @@ static void *rx_main(void *argument)
                        (unsigned int)frame.data, (unsigned int)frame.crc,
                        phy_frame_status_text(status));
 
-        if (status != PHY_FRAME_OK ||
-            (frame.control != PHY_CONTROL_DATA && frame.control != PHY_CONTROL_HELLO)) {
+        if (status != PHY_FRAME_OK) {
+            if (node->ack_enabled && status == PHY_FRAME_ERR_CRC) {
+                node_send_control(node, PHY_CONTROL_NACK, frame.seq);
+            }
             continue;
+        }
+
+        if (frame.control == PHY_CONTROL_ACK || frame.control == PHY_CONTROL_NACK) {
+            node_handle_ack(node, frame.control, frame.seq);
+            continue;
+        }
+
+        if (frame.control != PHY_CONTROL_DATA &&
+            frame.control != PHY_CONTROL_HELLO) {
+            continue;
+        }
+
+        {
+            int deliver = 0;
+            int duplicate = 0;
+
+            pthread_mutex_lock(&node->lock);
+            if (!node->rx_has_last) {
+                node->rx_has_last = 1;
+                node->rx_last_delivered = frame.seq;
+                node->rx_expected_seq = (uint8_t)((frame.seq + 1u) & 0x0Fu);
+                deliver = 1;
+            } else if (frame.seq == node->rx_expected_seq) {
+                node->rx_last_delivered = frame.seq;
+                node->rx_expected_seq = (uint8_t)((frame.seq + 1u) & 0x0Fu);
+                deliver = 1;
+            } else if (frame.seq == node->rx_last_delivered) {
+                duplicate = 1;
+            }
+            pthread_mutex_unlock(&node->lock);
+
+            if (duplicate) {
+                node_send_control(node, PHY_CONTROL_ACK, frame.seq);
+                continue;
+            }
+            if (!deliver) {
+                node_send_control(node, PHY_CONTROL_NACK, frame.seq);
+                continue;
+            }
         }
         {
             uint8_t decoded[8];
@@ -539,6 +747,7 @@ static void *rx_main(void *argument)
                                    sizeof(decoded), &decoded_length)) {
                 node_add_event(node, "ERROR", "decode byte 0x%02X",
                                (unsigned int)frame.data);
+                node_send_control(node, PHY_CONTROL_NACK, frame.seq);
                 continue;
             }
             for (index = 0; index < decoded_length; index++) {
@@ -562,6 +771,7 @@ static void *rx_main(void *argument)
                 }
             }
         }
+        node_send_control(node, PHY_CONTROL_ACK, frame.seq);
     }
     return NULL;
 }
@@ -584,19 +794,26 @@ static int tx_emit_frames(phy_node_t *node, uint8_t control,
         pthread_mutex_unlock(&node->lock);
         phy_frame_init(&frame, control, seq, payload[index], node->crc);
         phy_frame_to_bits(&frame, bits);
-        if (!phy_channel_send_bits(node->tx, bits, PHY_FRAME_BITS)) {
-            node_add_event(node, "ERROR", "TX frame %zu failed", index + 1u);
-            return 0;
+
+        if (node->ack_enabled) {
+            if (!node_send_frame_acked(node, &frame, bits)) {
+                return 0;
+            }
+        } else {
+            if (!node_send_bits(node, bits, PHY_FRAME_BITS)) {
+                node_add_event(node, "ERROR", "TX frame %zu failed", index + 1u);
+                return 0;
+            }
+            pthread_mutex_lock(&node->lock);
+            node->tx_seq = (uint8_t)((node->tx_seq + 1u) & 0x0Fu);
+            node->tx_frames++;
+            pthread_mutex_unlock(&node->lock);
+            node_add_event(node, "TX",
+                           "frame=%zu/%zu control=%s seq=%u data=0x%02X crc=0x%02X",
+                           index + 1u, length, phy_control_name(frame.control),
+                           (unsigned int)frame.seq, (unsigned int)frame.data,
+                           (unsigned int)frame.crc);
         }
-        pthread_mutex_lock(&node->lock);
-        node->tx_seq = (uint8_t)((node->tx_seq + 1u) & 0x0Fu);
-        node->tx_frames++;
-        pthread_mutex_unlock(&node->lock);
-        node_add_event(node, "TX",
-                       "frame=%zu/%zu control=%s seq=%u data=0x%02X crc=0x%02X",
-                       index + 1u, length, phy_control_name(frame.control),
-                       (unsigned int)frame.seq, (unsigned int)frame.data,
-                       (unsigned int)frame.crc);
     }
     return 1;
 }
@@ -629,7 +846,7 @@ static void *tx_main(void *argument)
         pthread_mutex_unlock(&node->lock);
 
         if (job->is_bits) {
-            if (phy_channel_send_bits(node->tx, job->payload, job->length)) {
+            if (node_send_bits(node, job->payload, job->length)) {
                 node_add_event(node, "TX", "BITS bits=%zu", job->length);
             } else {
                 node_add_event(node, "ERROR", "TX BITS failed");
@@ -658,8 +875,9 @@ static void *tx_main(void *argument)
                 node_add_event(node, "ERROR", "encode message");
                 ready = 0;
             }
-            if (ready) {
-                tx_emit_frames(node, PHY_CONTROL_DATA, payload, payload_length);
+            if (ready && !tx_emit_frames(node, PHY_CONTROL_DATA, payload,
+                                         payload_length)) {
+                node_add_event(node, "ERROR", "mensaje abortado");
             }
         }
         free(job->payload);
@@ -707,6 +925,8 @@ static void node_destroy(phy_node_t *node)
         free(node->events[--node->event_count]);
     }
     free(node->events);
+    pthread_cond_destroy(&node->ack_cond);
+    pthread_mutex_destroy(&node->tx_lock);
     pthread_cond_destroy(&node->tx_cond);
     pthread_mutex_destroy(&node->lock);
     free(node->name);
@@ -740,6 +960,12 @@ int phy_node_start(phy_node_t **out, const phy_node_config_t *config)
     node->encoding = config->encoding;
     node->rx_timeout_ms = config->rx_timeout_ms > 0 ? config->rx_timeout_ms : 200;
     node->trace = config->trace;
+    node->ack_enabled = config->ack_enabled ? 1 : 0;
+    node->ack_timeout_ms = config->ack_timeout_ms > 0 ? config->ack_timeout_ms : 6000;
+    node->ack_retries = config->ack_retries > 0 ? config->ack_retries : 3;
+    node->rx_expected_seq = 0;
+    node->rx_last_delivered = 0;
+    node->rx_has_last = 0;
     snprintf(node->rx_user, sizeof(node->rx_user), "anon");
 
     if (pthread_mutex_init(&node->lock, NULL) != 0) {
@@ -749,6 +975,23 @@ int phy_node_start(phy_node_t **out, const phy_node_config_t *config)
         return 0;
     }
     if (pthread_cond_init(&node->tx_cond, NULL) != 0) {
+        pthread_mutex_destroy(&node->lock);
+        free(node->name);
+        free(node->bind_host);
+        free(node);
+        return 0;
+    }
+    if (pthread_mutex_init(&node->tx_lock, NULL) != 0) {
+        pthread_cond_destroy(&node->tx_cond);
+        pthread_mutex_destroy(&node->lock);
+        free(node->name);
+        free(node->bind_host);
+        free(node);
+        return 0;
+    }
+    if (pthread_cond_init(&node->ack_cond, NULL) != 0) {
+        pthread_mutex_destroy(&node->tx_lock);
+        pthread_cond_destroy(&node->tx_cond);
         pthread_mutex_destroy(&node->lock);
         free(node->name);
         free(node->bind_host);
@@ -773,6 +1016,7 @@ int phy_node_start(phy_node_t **out, const phy_node_config_t *config)
         pthread_mutex_lock(&node->lock);
         node->running = 0;
         pthread_cond_broadcast(&node->tx_cond);
+        pthread_cond_broadcast(&node->ack_cond);
         pthread_mutex_unlock(&node->lock);
         pthread_join(node->tx_thread, NULL);
         node_destroy(node);
@@ -783,6 +1027,7 @@ int phy_node_start(phy_node_t **out, const phy_node_config_t *config)
         pthread_mutex_lock(&node->lock);
         node->running = 0;
         pthread_cond_broadcast(&node->tx_cond);
+        pthread_cond_broadcast(&node->ack_cond);
         pthread_mutex_unlock(&node->lock);
         pthread_join(node->rx_thread, NULL);
         pthread_join(node->tx_thread, NULL);
@@ -803,6 +1048,7 @@ void phy_node_stop(phy_node_t *node)
     pthread_mutex_lock(&node->lock);
     node->running = 0;
     pthread_cond_broadcast(&node->tx_cond);
+    pthread_cond_broadcast(&node->ack_cond);
     pthread_mutex_unlock(&node->lock);
 
     if (node->api_started) {

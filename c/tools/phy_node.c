@@ -29,6 +29,9 @@ typedef struct {
     phy_encoding_t encoding;
     phy_crc_algorithm_t crc;
     int trace;
+    int ack_enabled;
+    int ack_timeout_ms;
+    int ack_retries;
     int show_help;
 } options_t;
 
@@ -81,6 +84,9 @@ static void print_usage(const char *program)
             "  --port PUERTO            puerto TCP de la API (defecto 7000)\n"
             "  --encoding utf-8|latin-1 codificacion (defecto latin-1)\n"
             "  --crc NOMBRE             smbus|maxim-dow|sae-j1850|autosar\n"
+            "  --ack-timeout-ms N       espera de ACK/NACK (0 = automatico)\n"
+            "  --ack-retries N          reintentos por frame (defecto 3)\n"
+            "  --no-ack                 desactiva ACK/NACK\n"
             "  --trace                  muestra los eventos del nodo\n"
             "  --help                   muestra esta ayuda\n"
             "\n"
@@ -105,6 +111,9 @@ static int parse_options(int argc, char **argv, options_t *options)
         OPT_PORT,
         OPT_ENCODING,
         OPT_CRC,
+        OPT_ACK_TIMEOUT,
+        OPT_ACK_RETRIES,
+        OPT_NO_ACK,
         OPT_TRACE,
         OPT_HELP
     };
@@ -123,6 +132,9 @@ static int parse_options(int argc, char **argv, options_t *options)
         {"port", required_argument, NULL, OPT_PORT},
         {"encoding", required_argument, NULL, OPT_ENCODING},
         {"crc", required_argument, NULL, OPT_CRC},
+        {"ack-timeout-ms", required_argument, NULL, OPT_ACK_TIMEOUT},
+        {"ack-retries", required_argument, NULL, OPT_ACK_RETRIES},
+        {"no-ack", no_argument, NULL, OPT_NO_ACK},
         {"trace", no_argument, NULL, OPT_TRACE},
         {"help", no_argument, NULL, OPT_HELP},
         {NULL, 0, NULL, 0}
@@ -144,6 +156,9 @@ static int parse_options(int argc, char **argv, options_t *options)
     options->encoding = PHY_ENCODING_LATIN1;
     options->crc = PHY_CRC_SMBUS;
     options->trace = 0;
+    options->ack_enabled = 1;
+    options->ack_timeout_ms = 0;
+    options->ack_retries = 3;
     options->show_help = 0;
 
     opterr = 0;
@@ -222,6 +237,19 @@ static int parse_options(int argc, char **argv, options_t *options)
                 return 0;
             }
             break;
+        case OPT_ACK_TIMEOUT:
+            if (!parse_int(optarg, &options->ack_timeout_ms)) {
+                return 0;
+            }
+            break;
+        case OPT_ACK_RETRIES:
+            if (!parse_int(optarg, &options->ack_retries)) {
+                return 0;
+            }
+            break;
+        case OPT_NO_ACK:
+            options->ack_enabled = 0;
+            break;
         case OPT_TRACE:
             options->trace = 1;
             break;
@@ -257,6 +285,18 @@ static int parse_options(int argc, char **argv, options_t *options)
     }
     if (options->port < 0 || options->port > 65535) {
         return 0;
+    }
+    if (options->ack_retries < 1 || options->ack_retries > 10) {
+        return 0;
+    }
+    if (options->ack_timeout_ms < 0) {
+        return 0;
+    }
+    if (options->ack_timeout_ms == 0) {
+        int frame_ms = (int)((2000L * PHY_FRAME_BITS +
+                              options->clock_hz - 1) / options->clock_hz);
+
+        options->ack_timeout_ms = 2 * frame_ms + 1000;
     }
     return 1;
 }
@@ -316,6 +356,9 @@ int main(int argc, char **argv)
     node_config.port = options.port;
     node_config.rx_timeout_ms = 200;
     node_config.trace = options.trace;
+    node_config.ack_enabled = options.ack_enabled;
+    node_config.ack_timeout_ms = options.ack_timeout_ms;
+    node_config.ack_retries = options.ack_retries;
 
     if (!phy_node_start(&node, &node_config)) {
         fprintf(stderr, "No se pudo iniciar el nodo en %s:%d: %s\n",
@@ -337,6 +380,9 @@ int main(int argc, char **argv)
     printf("  clock_hz=%d, encoding=%s, crc=%s\n",
            options.clock_hz, phy_encoding_name(options.encoding),
            phy_crc_name(options.crc));
+    printf("  ACK=%s timeout=%d ms retries=%d\n",
+           options.ack_enabled ? "on" : "off", options.ack_timeout_ms,
+           options.ack_retries);
     fflush(stdout);
 
     signal(SIGINT, on_signal);

@@ -56,6 +56,23 @@
       display: block;
       overflow-wrap: anywhere;
     }
+    .frames {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: #fff;
+      border: 1px solid #d5d5d0;
+      border-radius: 6px;
+    }
+    .frames[hidden] { display: none; }
+    .frames-output {
+      margin: 0;
+      max-height: 220px;
+      overflow: auto;
+      font-family: ui-monospace, monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
     form {
       display: flex;
       gap: 8px;
@@ -103,10 +120,16 @@
 
     <div id="messages" class="messages"></div>
 
+    <section id="frames-panel" class="frames" hidden>
+      <span class="translation-label">Tramas enviadas a la Beagle</span>
+      <pre id="frames-output" class="frames-output"></pre>
+    </section>
+
     <form id="send-form">
       <select id="mode" aria-label="Modo de envio">
         <option value="frames">Tramas PHY</option>
         <option value="bits">Bits sin trama</option>
+        <option value="diagnostic">Tramas al LED (diagnóstico)</option>
       </select>
       <input id="text" type="text" autocomplete="off"
              maxlength="128" placeholder="Ej: hola" required>
@@ -125,6 +148,8 @@
       var asciiOutput = document.getElementById("ascii-output");
       var binaryOutput = document.getElementById("binary-output");
       var modeSelect = document.getElementById("mode");
+      var framesPanel = document.getElementById("frames-panel");
+      var framesOutput = document.getElementById("frames-output");
       var userLine = document.getElementById("user-line");
       var inboxSince = 0;
       var username = (window.prompt("Tu nombre de usuario:", "ana") || "").trim();
@@ -161,6 +186,7 @@
       }
 
       function sendMessage(text) {
+        framesPanel.hidden = true;
         addMessage("Tu (" + username + "): " + text, "sent");
         setBusy(true);
 
@@ -190,7 +216,84 @@
           });
       }
 
+      function appendFrameLine(line) {
+        framesOutput.textContent += line + "\n";
+        framesOutput.scrollTop = framesOutput.scrollHeight;
+      }
+
+      function pollFrames(job, since) {
+        fetch("/api/frames?job=" + encodeURIComponent(job) + "&since=" + since)
+          .then(function (response) {
+            return response.json().then(function (data) {
+              return { ok: response.ok, data: data };
+            });
+          })
+          .then(function (result) {
+            if (!result.ok) {
+              addMessage("Error: " + errorText(result.data, "trabajo no encontrado"), "error");
+              setBusy(false);
+              input.focus();
+              return;
+            }
+
+            var data = result.data;
+            if (data.lines && data.lines.length) {
+              data.lines.forEach(appendFrameLine);
+            }
+            if (!data.done) {
+              setTimeout(function () {
+                pollFrames(job, data.next);
+              }, 500);
+              return;
+            }
+
+            addMessage(data.ok ? "Tramas enviadas a la Beagle." : "El emisor termino con error.",
+                       data.ok ? "ok" : "error");
+            setBusy(false);
+            input.focus();
+          })
+          .catch(function () {
+            addMessage("Error: se corto el polling de tramas.", "error");
+            setBusy(false);
+            input.focus();
+          });
+      }
+
+      function sendFrames(text) {
+        framesPanel.hidden = false;
+        framesOutput.textContent = "";
+        addMessage("Tu (" + username + "): " + text, "sent");
+        addMessage("Enviando tramas al LED...", "sent");
+        setBusy(true);
+
+        fetch("/api/frames", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text })
+        })
+          .then(function (response) {
+            return response.json().then(function (data) {
+              return { ok: response.ok, data: data };
+            });
+          })
+          .then(function (result) {
+            if (!result.ok || !result.data.job) {
+              addMessage("Error: " + errorText(result.data, "no se pudo iniciar el envio"), "error");
+              setBusy(false);
+              input.focus();
+              return;
+            }
+            pollFrames(result.data.job, 0);
+          })
+          .catch(function () {
+            addMessage("Error: no se pudo contactar al servidor local.", "error");
+            setBusy(false);
+            input.focus();
+          });
+      }
+
       function sendBits(bits, text) {
+        framesPanel.hidden = true;
         addMessage("Tu (" + username + "): " + text, "sent");
         addMessage("Binario: " + bits, "sent");
         setBusy(true);
@@ -265,6 +368,11 @@
 
         if (modeSelect.value === "frames") {
           sendMessage(text);
+          return;
+        }
+
+        if (modeSelect.value === "diagnostic") {
+          sendFrames(text);
           return;
         }
 

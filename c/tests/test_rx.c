@@ -14,22 +14,29 @@ static int failures = 0;
         } \
     } while (0)
 
-static void build_samples(uint8_t *samples, size_t *length, size_t capacity,
-                          phy_crc_algorithm_t crc, uint8_t control, uint8_t seq, uint8_t data)
+static void append_bits(uint8_t *samples, size_t *length, size_t capacity,
+                        const uint8_t *bits, size_t bit_count)
 {
-    phy_frame_t frame;
-    uint8_t bits[PHY_FRAME_BITS];
     size_t index;
 
-    phy_frame_init(&frame, control, seq, data, crc);
-    phy_frame_to_bits(&frame, bits);
-    for (index = 0; index < PHY_FRAME_BITS; index++) {
+    for (index = 0; index < bit_count; index++) {
         if (*length + 2u > capacity) {
             return;
         }
         samples[(*length)++] = bits[index];
         samples[(*length)++] = bits[index];
     }
+}
+
+static void build_samples(uint8_t *samples, size_t *length, size_t capacity,
+                          phy_crc_algorithm_t crc, uint8_t control, uint8_t seq, uint8_t data)
+{
+    phy_frame_t frame;
+    uint8_t bits[PHY_FRAME_BITS];
+
+    phy_frame_init(&frame, control, seq, data, crc);
+    phy_frame_to_bits(&frame, bits);
+    append_bits(samples, length, capacity, bits, PHY_FRAME_BITS);
 }
 
 static void test_frame_ok(void)
@@ -87,16 +94,39 @@ static void test_frame_crc_error(void)
     CHECK(status == PHY_FRAME_ERR_CRC);
 }
 
-static void test_frame_syn_error(void)
+static void test_frame_with_leading_garbage(void)
+{
+    static const uint8_t garbage[] = { 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1 };
+    phy_fake_rx_channel_t channel;
+    phy_frame_t frame;
+    phy_frame_status_t status;
+    uint8_t wire[PHY_FRAME_BITS];
+    uint8_t samples[PHY_FRAME_BITS * 2u * 2u];
+    size_t length = 0;
+    int result;
+
+    append_bits(samples, &length, sizeof(samples), garbage, sizeof(garbage));
+    build_samples(samples, &length, sizeof(samples), PHY_CRC_SMBUS,
+                  PHY_CONTROL_DATA, 7, 'z');
+
+    CHECK(phy_fake_rx_channel_init(&channel, samples, length));
+    result = phy_rx_frame(phy_fake_rx_channel_base(&channel), PHY_CRC_SMBUS,
+                          &frame, &status, wire, sizeof(wire), -1);
+    CHECK(result == 1);
+    CHECK(status == PHY_FRAME_OK);
+    CHECK(frame.seq == 7u);
+    CHECK(frame.data == 'z');
+}
+
+static void test_frame_resync_after_bad_syn(void)
 {
     phy_fake_rx_channel_t channel;
     phy_frame_t frame;
     phy_frame_status_t status;
     uint8_t wire[PHY_FRAME_BITS];
     uint8_t bits[PHY_FRAME_BITS];
-    uint8_t samples[PHY_FRAME_BITS * 2u];
+    uint8_t samples[PHY_FRAME_BITS * 2u * 3u];
     size_t length = 0;
-    size_t index;
     int result;
 
     {
@@ -105,17 +135,50 @@ static void test_frame_syn_error(void)
         phy_frame_to_bits(&source, bits);
     }
     bits[0] ^= 1u;
-
-    for (index = 0; index < PHY_FRAME_BITS; index++) {
-        samples[length++] = bits[index];
-        samples[length++] = bits[index];
-    }
+    append_bits(samples, &length, sizeof(samples), bits, PHY_FRAME_BITS);
+    build_samples(samples, &length, sizeof(samples), PHY_CRC_SMBUS,
+                  PHY_CONTROL_DATA, 2, 'b');
 
     CHECK(phy_fake_rx_channel_init(&channel, samples, length));
     result = phy_rx_frame(phy_fake_rx_channel_base(&channel), PHY_CRC_SMBUS,
                           &frame, &status, wire, sizeof(wire), -1);
     CHECK(result == 1);
-    CHECK(status == PHY_FRAME_ERR_SYN);
+    CHECK(status == PHY_FRAME_OK);
+    CHECK(frame.seq == 2u);
+    CHECK(frame.data == 'b');
+}
+
+static void test_frame_resync_after_bit_slip(void)
+{
+    static const uint8_t extra_bit[] = { 0 };
+    phy_fake_rx_channel_t channel;
+    phy_frame_t frame;
+    phy_frame_status_t status;
+    uint8_t wire[PHY_FRAME_BITS];
+    uint8_t samples[PHY_FRAME_BITS * 2u * 3u];
+    size_t length = 0;
+    int result;
+
+    build_samples(samples, &length, sizeof(samples), PHY_CRC_SMBUS,
+                  PHY_CONTROL_DATA, 3, 'c');
+    append_bits(samples, &length, sizeof(samples), extra_bit, sizeof(extra_bit));
+    build_samples(samples, &length, sizeof(samples), PHY_CRC_SMBUS,
+                  PHY_CONTROL_DATA, 4, 'd');
+
+    CHECK(phy_fake_rx_channel_init(&channel, samples, length));
+    result = phy_rx_frame(phy_fake_rx_channel_base(&channel), PHY_CRC_SMBUS,
+                          &frame, &status, wire, sizeof(wire), -1);
+    CHECK(result == 1);
+    CHECK(status == PHY_FRAME_OK);
+    CHECK(frame.seq == 3u);
+    CHECK(frame.data == 'c');
+
+    result = phy_rx_frame(phy_fake_rx_channel_base(&channel), PHY_CRC_SMBUS,
+                          &frame, &status, wire, sizeof(wire), -1);
+    CHECK(result == 1);
+    CHECK(status == PHY_FRAME_OK);
+    CHECK(frame.seq == 4u);
+    CHECK(frame.data == 'd');
 }
 
 static void test_message_ascii(void)
@@ -200,7 +263,9 @@ int main(void)
 {
     test_frame_ok();
     test_frame_crc_error();
-    test_frame_syn_error();
+    test_frame_with_leading_garbage();
+    test_frame_resync_after_bad_syn();
+    test_frame_resync_after_bit_slip();
     test_message_ascii();
     test_message_latin1();
     test_timeout_idle();

@@ -82,6 +82,16 @@ static int client_command(client_t *client, const char *command,
     return phy_net_read_line(&client->reader, line, capacity, timeout_ms);
 }
 
+static unsigned long status_number(const char *line, const char *key)
+{
+    const char *value = strstr(line, key);
+
+    if (value == NULL) {
+        return 0;
+    }
+    return strtoul(value + strlen(key), NULL, 10);
+}
+
 static int expect_command(client_t *client, const char *command, const char *expected)
 {
     char line[512];
@@ -209,6 +219,9 @@ int main(void)
     config.port = 0;
     config.rx_timeout_ms = 100;
     config.trace = 0;
+    config.ack_enabled = 1;
+    config.ack_timeout_ms = 200;
+    config.ack_retries = 3;
     CHECK(phy_node_start(&node_a, &config));
     a_ready = node_a != NULL;
 
@@ -236,24 +249,42 @@ int main(void)
 
         CHECK(expect_command(&client_a, "STATUS", "STATUS node=A"));
 
-        CHECK(build_text_bits("ok", PHY_ENCODING_LATIN1, PHY_CRC_SMBUS,
-                              bits, sizeof(bits)) > 0);
-        {
-            char command[600];
-
-            snprintf(command, sizeof(command), "BITS %s", bits);
-            CHECK(expect_command(&client_b, command, "OK BITS"));
-            CHECK(wait_message(&client_a, &since_a, " bob ok", 2000));
-        }
-
         CHECK(expect_command(&client_a, "SEND ana largo desde A", "OK SEND"));
         CHECK(expect_command(&client_b, "SEND bob largo desde B", "OK SEND"));
         CHECK(wait_message(&client_b, &since_b, " ana largo desde A", 2000));
         CHECK(wait_message(&client_a, &since_a, " bob largo desde B", 2000));
+
+        CHECK(build_text_bits("ok", PHY_ENCODING_LATIN1, PHY_CRC_SMBUS,
+                              bits, sizeof(bits)) > 0);
+        {
+            char command[600];
+            char status[512];
+
+            snprintf(command, sizeof(command), "BITS %s", bits);
+            CHECK(expect_command(&client_b, command, "OK BITS"));
+            CHECK(wait_message(&client_b, &since_b, "BITS bits=", 2000));
+            CHECK(client_command(&client_a, "STATUS", status,
+                                 sizeof(status), 2000) == 1);
+            CHECK(status_number(status, "nack=") >= 1);
+        }
+
+        client_close(&client_b);
+        phy_node_stop(node_b);
+        b_ready = 0;
+
+        CHECK(expect_command(&client_a, "SEND ana timeout", "OK SEND"));
+        sleep_ms(1200);
+        {
+            char status[512];
+
+            CHECK(client_command(&client_a, "STATUS", status,
+                                 sizeof(status), 2000) == 1);
+            CHECK(status_number(status, "timeouts=") >= 1);
+            CHECK(status_number(status, "retries=") >= 1);
+        }
     }
 
     client_close(&client_a);
-    client_close(&client_b);
     if (a_ready) {
         phy_node_stop(node_a);
     }

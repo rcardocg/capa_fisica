@@ -17,6 +17,9 @@ typedef struct {
     int port;
     int rx_timeout_ms;
     int trace;
+    int ack_enabled;
+    int ack_timeout_ms;
+    int ack_retries;
 } phy_node_config_t;
 
 int phy_node_start(phy_node_t **out, const phy_node_config_t *config);

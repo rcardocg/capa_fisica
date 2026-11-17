@@ -4,12 +4,12 @@
 
 | Campo | Valor |
 |---|---|
-| Version | 0.7 (mensajes y gateway de la PC) |
-| Fecha | 2026-11-15 |
+| Version | 0.8 (ACK/NACK y resincronizacion) |
+| Fecha | 2026-11-16 |
 | Alcance | Enviar mensajes con usuario y mostrar los recibidos en el HTML |
-| Incluye | `/api/message`, `/api/inbox`, `/api/bits`, polling, nodo A en 7000 |
-| No incluye | ACK/NACK, otros canales, historial persistente |
-| Proxima ampliacion | Fase 6, conexion fisica y prueba real |
+| Incluye | `/api/message`, `/api/inbox`, `/api/bits`, polling, nodo A en 7000, ACK/NACK |
+| No incluye | Otros canales, historial persistente, ventana deslizante |
+| Proxima ampliacion | Fase 6, conexion fisica y prueba real; fase 7 ya en software |
 
 ## Que hace este documento
 
@@ -154,6 +154,8 @@ Modos:
   `POST /api/message` y el nodo A lo transmite con `HELLO` + `DATA`.
 - `Bits sin trama`: conserva el flujo anterior, convierte el texto con `ord`
   y envia el binario a `POST /api/bits`.
+- `Tramas al LED (diagnóstico)`: ejecuta el emisor C con `POST /api/frames` y
+  muestra en vivo las lineas `[TX]` y los bits enviados a la Beagle.
 
 La pagina hace polling de `GET /api/inbox?since=N` cada 800 ms y muestra los
 mensajes recibidos desde B con su origen y usuario. En modo bits se mantiene el
@@ -226,9 +228,9 @@ interfaz, sin duplicar la construccion de tramas.
 
 ### 9. Tramas desde la pagina
 
-Este endpoint ya no lo usa el HTML de la fase 4; queda como diagnostico del
-emisor C. El camino del chat usa `POST /api/message`. El servidor local expone
-dos endpoints:
+Este endpoint lo usa el modo
+`Tramas al LED (diagnóstico)` del HTML; el camino del chat usa
+`POST /api/message`. El servidor local expone dos endpoints:
 
 | Metodo | Ruta | Funcion |
 |---|---|---|
@@ -287,6 +289,32 @@ La Beagle no ejecuta nada de esto: solo recibe `BITS` y mueve el LED.
 - En `/api/bits`, el nodo responde cuando acepta el trabajo en la cola.
 - En `/api/message`, el nodo responde `OK SEND` cuando acepta el mensaje.
 - El nodo atiende una conexion de API a la vez.
+
+## ACK/NACK y retransmision
+
+- Cada frame `HELLO` y `DATA` espera un `ACK` del receptor.
+- Si el receptor detecta CRC invalido, envia `NACK` con el `SEQ` recibido.
+- Si el emisor recibe `NACK` o vence el timeout, retransmite el mismo frame.
+- El receptor acepta una sola vez cada `SEQ`; si recibe un duplicado, reenvia
+  `ACK` sin volver a entregar el mensaje.
+- El receptor se resincroniza buscando `SYN`/`SFD` en una ventana movil, sin
+  asumir que empieza en el bit 0 de una trama.
+- `BITS` crudo no participa del ACK/NACK. Si se usa mientras el chat tiene ACK
+  activo, puede desalinear el seguimiento de `SEQ`; usar `--no-ack` en ambos
+  nodos para pruebas de diagnostico.
+- Ambos nodos deben usar la misma configuracion de ACK. Un nodo con ACK activo
+  espera confirmacion y se bloquea si el otro usa `--no-ack`.
+
+Opciones:
+
+| Opcion | Defecto | Uso |
+|---|---|---|
+| `--ack-timeout-ms N` | automatico | Espera de ACK/NACK por frame |
+| `--ack-retries N` | `3` | Reintentos por frame |
+| `--no-ack` | desactivado | Desactiva ACK/NACK en el nodo |
+
+El timeout automatico es `2 * frame_ms + 1000`, con
+`frame_ms = 44 * 2 * 1000 / clock_hz`.
 
 ## Exportar con scp
 
